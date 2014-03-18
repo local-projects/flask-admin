@@ -1,6 +1,6 @@
 from flask.ext.admin.babel import gettext
 from flask.ext.admin.model import filters
-
+from bson.objectid import ObjectId
 from .tools import parse_like_term
 
 
@@ -95,11 +95,53 @@ class BooleanNotEqualFilter(FilterNotEqual, filters.BaseBooleanFilter):
         flt = {'%s' % self.column.name: value != '1'}
         return query.filter(**flt)
 
+class FilterObjectIdEqual(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        column_name = self.column.name
 
-# Base peewee filter field converter
+        flt = {'%s' % column_name: value}
+        return query.filter(**flt)
+
+    def operation(self):
+        return gettext('ObjectId equal')
+
+class FilterObjectIdNotEqual(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        column_name = self.column.name
+        flt = {'%s__ne' % column_name: value}
+        return query.filter(**flt)
+
+    def operation(self):
+        return gettext('ObjectId not equal')
+
+class FilterObjectIdIn(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        column_name = self.column.name
+        value = [v.strip() for v in value.split(',')]
+        flt = {'%s__in' % column_name: value}
+        return query.filter(**flt)
+
+    def operation(self):
+        return gettext('ObjectId in')
+
+class FilterObjectIdNotIn(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        column_name = self.column.name
+        value = [v.strip() for v in value.split(',')]
+        flt = {'%s__nin' % column_name: value}
+        return query.filter(**flt)
+
+    def operation(self):
+        return gettext('ObjectId not in')
+
+
+# Base MongoEngine filter field converter
 class FilterConverter(filters.BaseFilterConverter):
     strings = (FilterEqual, FilterNotEqual, FilterLike, FilterNotLike)
     numeric = (FilterEqual, FilterNotEqual, FilterGreater, FilterSmaller)
+    objectid = (FilterObjectIdEqual, FilterObjectIdNotEqual,
+               FilterObjectIdIn, FilterObjectIdNotIn)
+    lists = (FilterEqual, FilterNotEqual)
 
     def convert(self, type_name, column, name):
         if type_name in self.converters:
@@ -128,3 +170,12 @@ class FilterConverter(filters.BaseFilterConverter):
     def conv_datetime(self, column, name):
         return [f(column, name, data_type='datetimepicker')
                 for f in self.numeric]
+    
+    @filters.convert('ObjectIdField')
+    def conv_objectid(self, column, name):
+        return [f(column, name) for f in self.objectid]
+
+    @filters.convert('ListField')
+    def conv_list(self, column, name):
+        return [f(column, name) for f in self.lists]
+    

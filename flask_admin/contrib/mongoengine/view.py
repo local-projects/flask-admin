@@ -429,15 +429,27 @@ class ModelView(BaseModelView):
             op, term = parse_like_term(search)
 
             criteria = None
-
-            for field in self._search_fields:
-                flt = {'%s__%s' % (field.name, op): term}
-                q = mongoengine.Q(**flt)
-
-                if criteria is None:
-                    criteria = q
-                else:
-                    criteria |= q
+            
+            # If the term is an ObjectId, then only search oid fields in the list
+            if ObjectId.is_valid(term):
+                for field in self._search_fields:
+                    if isinstance(field, (mongoengine.base.fields.ObjectIdField)):
+                        flt = {field.name: term}
+                        q = mongoengine.Q(**flt)
+                        if criteria is None:
+                            criteria = q
+                        else:
+                            criteria |= q
+                        
+            else:
+                for field in self._search_fields:    
+                    flt = {'%s__%s' % (field.name, op): term}
+                    q = mongoengine.Q(**flt)
+    
+                    if criteria is None:
+                        criteria = q
+                    else:
+                        criteria |= q
 
             query = query.filter(criteria)
 

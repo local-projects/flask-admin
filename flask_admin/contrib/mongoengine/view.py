@@ -430,26 +430,19 @@ class ModelView(BaseModelView):
 
             criteria = None
             
-            # If the term is an ObjectId, then only search oid fields in the list
-            if ObjectId.is_valid(term):
-                for field in self._search_fields:
-                    if isinstance(field, (mongoengine.base.fields.ObjectIdField)):
+            for field in self._search_fields:
+                if isinstance(field, (mongoengine.base.fields.ObjectIdField)):
+                    if ObjectId.is_valid(term):
                         flt = {field.name: term}
-                        q = mongoengine.Q(**flt)
-                        if criteria is None:
-                            criteria = q
-                        else:
-                            criteria |= q
-                        
-            else:
-                for field in self._search_fields:    
+                else:
                     flt = {'%s__%s' % (field.name, op): term}
-                    q = mongoengine.Q(**flt)
-    
-                    if criteria is None:
-                        criteria = q
-                    else:
-                        criteria |= q
+                    
+                q = mongoengine.Q(**flt)
+
+                if criteria is None:
+                    criteria = q
+                else:
+                    criteria |= q
 
             query = query.filter(criteria)
 

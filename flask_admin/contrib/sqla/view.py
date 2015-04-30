@@ -11,14 +11,16 @@ from flask import flash
 from flask.ext.admin._compat import string_types
 from flask.ext.admin.babel import gettext, ngettext, lazy_gettext
 from flask.ext.admin.model import BaseModelView
+from flask.ext.admin.model.form import wrap_fields_in_fieldlist
+from flask.ext.admin.model.fields import ListEditableFieldList
+
 from flask.ext.admin.actions import action
 from flask.ext.admin._backwards import ObsoleteAttr
 
 from flask.ext.admin.contrib.sqla import form, filters, tools
 from .typefmt import DEFAULT_FORMATTERS
-from .tools import is_inherited_primary_key, get_column_for_current_model, get_query_for_ids
+from .tools import get_query_for_ids
 from .ajax import create_ajax_loader
-
 
 # Set up logger
 log = logging.getLogger("flask-admin.sqla")
@@ -78,8 +80,7 @@ class ModelView(BaseModelView):
                                           'searchable_columns',
                                           None)
     """
-        Collection of the searchable columns. Only text-based columns
-        are searchable (`String`, `Unicode`, `Text`, `UnicodeText`).
+        Collection of the searchable columns.
 
         Example::
 
@@ -146,7 +147,7 @@ class ModelView(BaseModelView):
 
             class MyInlineModelConverter(AdminModelConverter):
                 def post_process(self, form_class, info):
-                    form_class.value = wtf.TextField('value')
+                    form_class.value = wtf.StringField('value')
                     return form_class
 
             class MyAdminView(ModelView):
@@ -242,7 +243,8 @@ class ModelView(BaseModelView):
     """
 
     def __init__(self, model, session,
-                 name=None, category=None, endpoint=None, url=None):
+                 name=None, category=None, endpoint=None, url=None, static_folder=None,
+                 menu_class_name=None, menu_icon_type=None, menu_icon_value=None):
         """
             Constructor.
 
@@ -258,18 +260,33 @@ class ModelView(BaseModelView):
                 Endpoint name. If not set, defaults to the model name
             :param url:
                 Base URL. If not set, defaults to '/admin/' + endpoint
+            :param menu_class_name:
+                Optional class name for the menu item.
+            :param menu_icon_type:
+                Optional icon. Possible icon types:
+
+                 - `flask.ext.admin.consts.ICON_TYPE_GLYPH` - Bootstrap glyph icon
+                 - `flask.ext.admin.consts.ICON_TYPE_IMAGE` - Image relative to Flask static directory
+                 - `flask.ext.admin.consts.ICON_TYPE_IMAGE_URL` - Image with full URL
+            :param menu_icon_value:
+                Icon glyph name or URL, depending on `menu_icon_type` setting
         """
         self.session = session
 
         self._search_fields = None
-        self._search_joins = dict()
+        self._search_joins = []
 
         self._filter_joins = dict()
+
+        self._sortable_joins = dict()
 
         if self.form_choices is None:
             self.form_choices = {}
 
-        super(ModelView, self).__init__(model, name, category, endpoint, url)
+        super(ModelView, self).__init__(model, name, category, endpoint, url, static_folder,
+                                        menu_class_name=menu_class_name,
+                                        menu_icon_type=menu_icon_type,
+                                        menu_icon_value=menu_icon_value)
 
         # Primary key
         self._primary_key = self.scaffold_pk()
@@ -293,26 +310,70 @@ class ModelView(BaseModelView):
 
         return model._sa_class_manager.mapper.iterate_properties
 
+    def _get_columns_for_field(self, field):
+        if (not field or
+            not hasattr(field, 'property') or
+            not hasattr(field.property, 'columns') or
+            not field.property.columns):
+                raise Exception('Invalid field %s: does not contains any columns.' % field)
+
+        return field.property.columns
+
+    def _get_field_with_path(self, name):
+        join_tables = []
+
+        if isinstance(name, string_types):
+            model = self.model
+
+            for attribute in name.split('.'):
+                value = getattr(model, attribute)
+
+                if (hasattr(value, 'property') and
+                    hasattr(value.property, 'direction')):
+                    model = value.property.mapper.class_
+                    table = model.__table__
+
+                    if self._need_join(table):
+                        join_tables.append(table)
+
+                attr = value
+        else:
+            attr = name
+
+            # determine joins if Table.column (relation object) is given
+            if isinstance(name, InstrumentedAttribute):
+                columns = self._get_columns_for_field(name)
+
+                if len(columns) > 1:
+                    raise Exception('Can only handle one column for %s' % name)
+
+                column = columns[0]
+
+                if self._need_join(column.table):
+                    join_tables.append(column.table)
+
+        return join_tables, attr
+
+    def _need_join(self, table):
+        return table not in self.model._sa_class_manager.mapper.tables
+
     # Scaffolding
     def scaffold_pk(self):
         """
-            Return the primary key name from a model
-            PK can be a single value or a tuple if multiple PKs exist
+            Return the primary key name(s) from a model
+            If model has single primary key, will return a string and tuple otherwise
         """
         return tools.get_primary_key(self.model)
 
     def get_pk_value(self, model):
         """
-            Return the PK value from a model object.
-            PK can be a single value or a tuple if multiple PKs exist
+            Return the primary key value from a model object.
+            If there are multiple primary keys, they're encoded into string representation.
         """
-        try:
-            return getattr(model, self._primary_key)
-        except TypeError:
-            v = []
-            for attr in self._primary_key:
-                v.append(getattr(model, attr))
-            return tuple(v)
+        if isinstance(self._primary_key, tuple):
+            return tools.iterencode(getattr(model, attr) for attr in self._primary_key)
+        else:
+            return tools.escape(getattr(model, self._primary_key))
 
     def scaffold_list_columns(self):
         """
@@ -321,24 +382,22 @@ class ModelView(BaseModelView):
         columns = []
 
         for p in self._get_model_iterator():
-            # Verify type
             if hasattr(p, 'direction'):
                 if self.column_display_all_relations or p.direction.name == 'MANYTOONE':
                     columns.append(p.key)
             elif hasattr(p, 'columns'):
-                column_inherited_primary_key = False
+                if len(p.columns) > 1:
+                    filtered = tools.filter_foreign_columns(self.model.__table__, p.columns)
 
-                if len(p.columns) != 1:
-                    if is_inherited_primary_key(p):
-                        column = get_column_for_current_model(p)
-                    else:
+                    if len(filtered) > 1:
+                        # TODO: Skip column and issue a warning
                         raise TypeError('Can not convert multiple-column properties (%s.%s)' % (self.model, p.key))
+
+                    column = filtered[0]
                 else:
-                    # Grab column
                     column = p.columns[0]
 
-                # An inherited primary key has a foreign key as well
-                if column.foreign_keys and not is_inherited_primary_key(p):
+                if column.foreign_keys:
                     continue
 
                 if not self.column_display_pk and column.primary_key:
@@ -375,25 +434,38 @@ class ModelView(BaseModelView):
 
         return columns
 
-    def _get_columns_for_field(self, field):
-        if isinstance(field, string_types):
-            attr = getattr(self.model, field, None)
+    def get_sortable_columns(self):
+        """
+            Returns a dictionary of the sortable columns. Key is a model
+            field name and value is sort column (for example - attribute).
 
-            if field is None:
-                raise Exception('Field %s was not found.' % field)
+            If `column_sortable_list` is set, will use it. Otherwise, will call
+            `scaffold_sortable_columns` to get them from the model.
+        """
+        self._sortable_joins = dict()
+
+        if self.column_sortable_list is None:
+            return self.scaffold_sortable_columns()
         else:
-            attr = field
+            result = dict()
 
-        if (not attr or
-            not hasattr(attr, 'property') or
-            not hasattr(attr.property, 'columns') or
-            not attr.property.columns):
-                raise Exception('Invalid field %s: does not contains any columns.' % field)
+            for c in self.column_sortable_list:
+                if isinstance(c, tuple):
+                    join_tables, column = self._get_field_with_path(c[1])
+                    column_name = c[0]
+                elif isinstance(c, InstrumentedAttribute):
+                    join_tables, column = self._get_field_with_path(c)
+                    column_name = str(c)
+                else:
+                    join_tables, column = self._get_field_with_path(c)
+                    column_name = c
 
-        return attr.property.columns
+                result[column_name] = column
 
-    def _need_join(self, table):
-        return table not in self.model._sa_class_manager.mapper.tables
+                if join_tables:
+                    self._sortable_joins[column_name] = join_tables
+
+            return result
 
     def init_search(self):
         """
@@ -405,21 +477,26 @@ class ModelView(BaseModelView):
         """
         if self.column_searchable_list:
             self._search_fields = []
-            self._search_joins = dict()
+            self._search_joins = []
+
+            joins = set()
 
             for p in self.column_searchable_list:
-                for column in self._get_columns_for_field(p):
-                    column_type = type(column.type).__name__
+                join_tables, attr = self._get_field_with_path(p)
 
-                    if not self.is_text_column_type(column_type):
-                        raise Exception('Can only search on text columns. ' +
-                                        'Failed to setup search for "%s"' % p)
+                if not attr:
+                    raise Exception('Failed to find field for search field: %s' % p)
+
+                for column in self._get_columns_for_field(attr):
+                    column_type = type(column.type).__name__
 
                     self._search_fields.append(column)
 
-                    # If it belongs to different table - add a join
-                    if self._need_join(column.table):
-                        self._search_joins[column.table.name] = column.table
+                    # Store joins, avoid duplicates
+                    for table in join_tables:
+                        if table.name not in joins:
+                            self._search_joins.append(table)
+                            joins.add(table.name)
 
         return bool(self.column_searchable_list)
 
@@ -428,35 +505,19 @@ class ModelView(BaseModelView):
             Verify if the provided column type is text-based.
 
             :returns:
-                ``True`` for ``String``, ``Unicode``, ``Text``, ``UnicodeText``
+                ``True`` for ``String``, ``Unicode``, ``Text``, ``UnicodeText``, ``varchar``
         """
         if name:
             name = name.lower()
 
-        return name in ('string', 'unicode', 'text', 'unicodetext')
+        return name in ('string', 'unicode', 'text', 'unicodetext', 'varchar')
 
     def scaffold_filters(self, name):
         """
             Return list of enabled filters
         """
 
-        join_tables = []
-        if isinstance(name, string_types):
-            model = self.model
-
-            for attribute in name.split('.'):
-                value = getattr(model, attribute)
-                if (hasattr(value, 'property') and
-                    hasattr(value.property, 'direction')):
-                    model = value.property.mapper.class_
-                    table = model.__table__
-
-                    if self._need_join(table):
-                        join_tables.append(table)
-
-                attr = value
-        else:
-            attr = name
+        join_tables, attr = self._get_field_with_path(name)
 
         if attr is None:
             raise Exception('Failed to find field for filter: %s' % name)
@@ -487,7 +548,7 @@ class ModelView(BaseModelView):
                         if join_tables:
                             self._filter_joins[table.name] = join_tables
                         elif self._need_join(table.name):
-                            self._filter_joins[table.name] = [table.name]
+                            self._filter_joins[table.name] = [table]
                         filters.extend(flt)
 
             return filters
@@ -537,6 +598,14 @@ class ModelView(BaseModelView):
         """
         return isinstance(filter, filters.BaseSQLAFilter)
 
+    def handle_filter(self, filter):
+        column = filter.column
+
+        if self._need_join(column.table):
+            self._filter_joins[column.table.name] = [column.table]
+
+        return filter
+
     def scaffold_form(self):
         """
             Create form from the model.
@@ -553,6 +622,28 @@ class ModelView(BaseModelView):
             form_class = self.scaffold_inline_form_models(form_class)
 
         return form_class
+
+    def scaffold_list_form(self, custom_fieldlist=ListEditableFieldList,
+                           validators=None):
+        """
+            Create form for the `index_view` using only the columns from
+            `self.column_editable_list`.
+
+            :param validators:
+                `form_args` dict with only validators
+                {'name': {'validators': [required()]}}
+            :param custom_fieldlist:
+                A WTForm FieldList class. By default, `ListEditableFieldList`.
+        """
+        converter = self.model_form_converter(self.session, self)
+        form_class = form.get_form(self.model, converter,
+                                   base_class=self.form_base_class,
+                                   only=self.column_editable_list,
+                                   field_args=validators)
+
+        return wrap_fields_in_fieldlist(self.form_base_class,
+                                        form_class,
+                                        custom_fieldlist)
 
     def scaffold_inline_form_models(self, form_class):
         """
@@ -607,16 +698,29 @@ class ModelView(BaseModelView):
             Return a query for the model type.
 
             If you override this method, don't forget to override `get_count_query` as well.
+            
+            This method can be used to set a "persistent filter" on an index_view.
+            
+            Example::
+            
+                class MyView(ModelView):
+                    def get_query(self):
+                        return super(MyView, self).get_query().filter(User.username == current_user.username)
         """
         return self.session.query(self.model)
 
     def get_count_query(self):
         """
             Return a the count query for the model type
+
+            A query(self.model).count() approach produces an excessive
+            subquery, so query(func.count('*')) should be used instead.
+
+            See #45a2723 commit message for details.
         """
         return self.session.query(func.count('*')).select_from(self.model)
 
-    def _order_by(self, query, joins, sort_field, sort_desc):
+    def _order_by(self, query, joins, sort_joins, sort_field, sort_desc):
         """
             Apply order_by to the query
 
@@ -630,33 +734,13 @@ class ModelView(BaseModelView):
                 Ascending or descending
         """
         # TODO: Preprocessing for joins
-        # Try to handle it as a string
-        if isinstance(sort_field, string_types):
-            # Create automatic join against a table if column name
-            # contains dot.
-            if '.' in sort_field:
-                parts = sort_field.split('.', 1)
-
-                if parts[0] not in joins:
-                    query = query.join(parts[0])
-                    joins.add(parts[0])
-        elif isinstance(sort_field, InstrumentedAttribute):
-            # SQLAlchemy 0.8+ uses 'parent' as a name
-            mapper = getattr(sort_field, 'parent', None)
-            if mapper is None:
-                # SQLAlchemy 0.7.x uses parententity
-                mapper = getattr(sort_field, 'parententity', None)
-
-            if mapper is not None:
-                table = mapper.tables[0]
-
-                if self._need_join(table) and table.name not in joins:
+        # Handle joins
+        if sort_joins:
+            for table in sort_joins:
+                if table.name not in joins:
                     query = query.outerjoin(table)
+
                     joins.add(table.name)
-        elif isinstance(sort_field, Column):
-            pass
-        else:
-            raise TypeError('Wrong argument type')
 
         if sort_field is not None:
             if sort_desc:
@@ -672,10 +756,9 @@ class ModelView(BaseModelView):
         if order is not None:
             field, direction = order
 
-            if isinstance(field, string_types):
-                field = getattr(self.model, field)
+            join_tables, attr = self._get_field_with_path(field)
 
-            return field, direction
+            return join_tables, attr, direction
 
         return None
 
@@ -703,15 +786,23 @@ class ModelView(BaseModelView):
         query = self.get_query()
         count_query = self.get_count_query()
 
+        # Ignore eager-loaded relations (prevent unnecessary joins)
+        # TODO: Separate join detection for query and count query?
+        if hasattr(query, '_join_entities'):
+            for entity in query._join_entities:
+                for table in entity.tables:
+                    joins.add(table.name)
+
         # Apply search criteria
         if self._search_supported and search:
             # Apply search-related joins
             if self._search_joins:
-                for jn in self._search_joins.values():
-                    query = query.join(jn)
-                    count_query = count_query.join(jn)
+                for table in self._search_joins:
+                    if table.name not in joins:
+                        query = query.outerjoin(table)
+                        count_query = count_query.outerjoin(table)
 
-                joins = set(self._search_joins.keys())
+                        joins.add(table.name)
 
             # Apply terms
             terms = search.split(' ')
@@ -727,7 +818,7 @@ class ModelView(BaseModelView):
 
         # Apply filters
         if filters and self._filters:
-            for idx, value in filters:
+            for idx, flt_name, value in filters:
                 flt = self._filters[idx]
 
                 # Figure out joins
@@ -741,9 +832,9 @@ class ModelView(BaseModelView):
                         count_query = count_query.join(table)
                         joins.add(table.name)
 
-                # Apply filter
-                query = flt.apply(query, value)
-                count_query = flt.apply(count_query, value)
+                # turn into python format with .clean() and apply filter
+                query = flt.apply(query, flt.clean(value))
+                count_query = flt.apply(count_query, flt.clean(value))
 
         # Calculate number of rows
         count = count_query.scalar()
@@ -756,13 +847,16 @@ class ModelView(BaseModelView):
         if sort_column is not None:
             if sort_column in self._sortable_columns:
                 sort_field = self._sortable_columns[sort_column]
+                sort_joins = self._sortable_joins.get(sort_column)
 
-                query, joins = self._order_by(query, joins, sort_field, sort_desc)
+                query, joins = self._order_by(query, joins, sort_joins, sort_field, sort_desc)
         else:
             order = self._get_default_order()
 
             if order:
-                query, joins = self._order_by(query, joins, order[0], order[1])
+                sort_joins, sort_field, sort_desc = order
+
+                query, joins = self._order_by(query, joins, sort_joins, sort_field, sort_desc)
 
         # Pagination
         if page is not None:
@@ -783,7 +877,7 @@ class ModelView(BaseModelView):
             :param id:
                 Model id
         """
-        return self.session.query(self.model).get(id)
+        return self.session.query(self.model).get(tools.iterdecode(id))
 
     # Error handler
     def handle_view_exception(self, exc):
@@ -791,7 +885,7 @@ class ModelView(BaseModelView):
             flash(gettext('Integrity error. %(message)s', message=exc.message), 'error')
             return True
 
-        return super(BaseModelView, self).handle_view_exception(exc)
+        return super(ModelView, self).handle_view_exception(exc)
 
     # Model handlers
     def create_model(self, form):
@@ -809,11 +903,11 @@ class ModelView(BaseModelView):
             self.session.commit()
         except Exception as ex:
             if not self.handle_view_exception(ex):
-                raise
+                flash(gettext('Failed to create record. %(error)s', error=str(ex)), 'error')
+                log.exception('Failed to create record.')
 
-            flash(gettext('Failed to create model. %(error)s', error=str(ex)), 'error')
-            log.exception('Failed to create model')
             self.session.rollback()
+
             return False
         else:
             self.after_model_change(form, model, True)
@@ -835,10 +929,9 @@ class ModelView(BaseModelView):
             self.session.commit()
         except Exception as ex:
             if not self.handle_view_exception(ex):
-                raise
+                flash(gettext('Failed to update record. %(error)s', error=str(ex)), 'error')
+                log.exception('Failed to update record.')
 
-            flash(gettext('Failed to update model. %(error)s', error=str(ex)), 'error')
-            log.exception('Failed to update model')
             self.session.rollback()
 
             return False
@@ -862,11 +955,11 @@ class ModelView(BaseModelView):
             return True
         except Exception as ex:
             if not self.handle_view_exception(ex):
-                raise
+                flash(gettext('Failed to delete record. %(error)s', error=str(ex)), 'error')
+                log.exception('Failed to delete record.')
 
-            flash(gettext('Failed to delete model. %(error)s', error=str(ex)), 'error')
-            log.exception('Failed to delete model')
             self.session.rollback()
+
             return False
 
     # Default model actions
@@ -879,10 +972,9 @@ class ModelView(BaseModelView):
 
     @action('delete',
             lazy_gettext('Delete'),
-            lazy_gettext('Are you sure you want to delete selected models?'))
+            lazy_gettext('Are you sure you want to delete selected records?'))
     def action_delete(self, ids):
         try:
-
             query = get_query_for_ids(self.get_query(), self.model, ids)
 
             if self.fast_mass_delete:
@@ -891,17 +983,17 @@ class ModelView(BaseModelView):
                 count = 0
 
                 for m in query.all():
-                    self.session.delete(m)
-                    count += 1
+                    if self.delete_model(m):
+                        count += 1
 
             self.session.commit()
 
-            flash(ngettext('Model was successfully deleted.',
-                           '%(count)s models were successfully deleted.',
+            flash(ngettext('Record was successfully deleted.',
+                           '%(count)s records were successfully deleted.',
                            count,
                            count=count))
         except Exception as ex:
             if not self.handle_view_exception(ex):
                 raise
 
-            flash(gettext('Failed to delete models. %(error)s', error=str(ex)), 'error')
+            flash(gettext('Failed to delete records. %(error)s', error=str(ex)), 'error')

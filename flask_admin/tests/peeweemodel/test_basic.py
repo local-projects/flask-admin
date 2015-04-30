@@ -16,6 +16,8 @@ from flask.ext.admin.contrib.peewee import ModelView
 
 from . import setup
 
+from datetime import datetime, time, date
+
 
 class CustomModelView(ModelView):
     def __init__(self, model,
@@ -35,27 +37,74 @@ def create_models(db):
             database = db
 
     class Model1(BaseModel):
-        def __init__(self, test1=None, test2=None, test3=None, test4=None):
+        def __init__(self, test1=None, test2=None, test3=None, test4=None,
+                     date_field=None, timeonly_field=None, 
+                     datetime_field=None):
             super(Model1, self).__init__()
 
             self.test1 = test1
             self.test2 = test2
             self.test3 = test3
             self.test4 = test4
+            self.date_field = date_field
+            self.timeonly_field = timeonly_field
+            self.datetime_field = datetime_field
 
-        test1 = peewee.CharField(max_length=20)
-        test2 = peewee.CharField(max_length=20)
+        test1 = peewee.CharField(max_length=20, null=True)
+        test2 = peewee.CharField(max_length=20, null=True)
         test3 = peewee.TextField(null=True)
         test4 = peewee.TextField(null=True)
+        date_field = peewee.DateField(null=True)
+        timeonly_field = peewee.TimeField(null=True)
+        datetime_field = peewee.DateTimeField(null=True)
+
+        def __str__(self):
+            # "or ''" fixes error when loading choices for relation field:
+            # TypeError: coercing to Unicode: need string or buffer, NoneType found
+            return self.test1 or ''
 
     class Model2(BaseModel):
-        int_field = peewee.IntegerField()
+        def __init__(self, char_field=None, int_field=None, float_field=None,
+                     bool_field=0):
+            super(Model2, self).__init__()
+
+            self.char_field = char_field
+            self.int_field = int_field
+            self.float_field = float_field
+            self.bool_field = bool_field
+
+        char_field = peewee.CharField(max_length=20)
+        int_field = peewee.IntegerField(null=True)
+        float_field = peewee.FloatField(null=True)
         bool_field = peewee.BooleanField()
+
+        # Relation
+        model1 = peewee.ForeignKeyField(Model1, null=True)
 
     Model1.create_table()
     Model2.create_table()
 
     return Model1, Model2
+
+
+def fill_db(Model1, Model2):
+    Model1('test1_val_1', 'test2_val_1').save()
+    Model1('test1_val_2', 'test2_val_2').save()
+    Model1('test1_val_3', 'test2_val_3').save()
+    Model1('test1_val_4', 'test2_val_4').save()
+    Model1(None, 'empty_obj').save()
+
+    Model2('char_field_val_1', None, None).save()
+    Model2('char_field_val_2', None, None).save()
+    Model2('char_field_val_3', 5000, 25.9).save()
+    Model2('char_field_val_4', 9000, 75.5).save()
+
+    Model1('date_obj1', date_field=date(2014,11,17)).save()
+    Model1('date_obj2', date_field=date(2013,10,16)).save()
+    Model1('timeonly_obj1', timeonly_field=time(11,10,9)).save()
+    Model1('timeonly_obj2', timeonly_field=time(10,9,8)).save()
+    Model1('datetime_obj1', datetime_field=datetime(2014,4,3,1,9,0)).save()
+    Model1('datetime_obj2', datetime_field=datetime(2013,3,2,0,8,0)).save()
 
 
 def test_model():
@@ -82,8 +131,8 @@ def test_model():
     eq_(view._filters, None)
 
     # Verify form
-    eq_(view._create_form_class.test1.field_class, fields.TextField)
-    eq_(view._create_form_class.test2.field_class, fields.TextField)
+    eq_(view._create_form_class.test1.field_class, fields.StringField)
+    eq_(view._create_form_class.test2.field_class, fields.StringField)
     eq_(view._create_form_class.test3.field_class, fields.TextAreaField)
     eq_(view._create_form_class.test4.field_class, fields.TextAreaField)
 
@@ -130,6 +179,560 @@ def test_model():
     eq_(Model1.select().count(), 0)
 
 
+def test_column_editable_list():
+    app, db, admin = setup()
+
+    Model1, Model2 = create_models(db)
+
+    view = CustomModelView(Model1,
+                           column_editable_list=[
+                               'test1', 'enum_field'])
+    admin.add_view(view)
+
+    fill_db(Model1, Model2)
+
+    client = app.test_client()
+
+    # Test in-line edit field rendering
+    rv = client.get('/admin/model1/')
+    data = rv.data.decode('utf-8')
+    ok_('data-role="x-editable"' in data)
+
+    # Form - Test basic in-line edit functionality
+    rv = client.post('/admin/model1/ajax/update/', data={
+        'test1-1': 'change-success-1',
+    })
+    data = rv.data.decode('utf-8')
+    ok_('Record was successfully saved.' == data)
+
+    # ensure the value has changed
+    rv = client.get('/admin/model1/')
+    data = rv.data.decode('utf-8')
+    ok_('change-success-1' in data)
+
+    # Test validation error
+    rv = client.post('/admin/model1/ajax/update/', data={
+        'enum_field-1': 'problematic-input',
+    })
+    eq_(rv.status_code, 500)
+
+    # Test invalid primary key
+    rv = client.post('/admin/model1/ajax/update/', data={
+        'test1-1000': 'problematic-input',
+    })
+    data = rv.data.decode('utf-8')
+    eq_(rv.status_code, 500)
+
+    # Test editing column not in column_editable_list
+    rv = client.post('/admin/model1/ajax/update/', data={
+        'test2-1': 'problematic-input',
+    })
+    data = rv.data.decode('utf-8')
+    eq_(rv.status_code, 500)
+
+    # Test in-line editing for relations
+    view = CustomModelView(Model2,
+                           column_editable_list=[
+                               'model1'])
+    admin.add_view(view)
+
+    rv = client.post('/admin/model2/ajax/update/', data={
+        'model1-1': '3',
+    })
+    data = rv.data.decode('utf-8')
+    ok_('Record was successfully saved.' == data)
+
+    # confirm the value has changed
+    rv = client.get('/admin/model2/')
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_3' in data)
+
+
+def test_column_filters():
+    app, db, admin = setup()
+    
+    Model1, Model2 = create_models(db)
+    
+    fill_db(Model1, Model2)
+
+    # Test string filter
+    view = CustomModelView(Model1, column_filters=['test1'])
+    admin.add_view(view)
+    
+    eq_(len(view._filters), 7)
+
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Test1']],
+        [
+            (0, 'equals'),
+            (1, 'not equal'),
+            (2, 'contains'),
+            (3, 'not contains'),
+            (4, 'empty'),
+            (5, 'in list'),
+            (6, 'not in list'),
+        ])
+        
+    # Make some test clients
+    client = app.test_client()
+    
+    # string - equals
+    rv = client.get('/admin/model1/?flt0_0=test1_val_1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' in data)
+    ok_('test1_val_2' not in data)
+    
+    # string - not equal
+    rv = client.get('/admin/model1/?flt0_1=test1_val_1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' not in data)
+    ok_('test1_val_2' in data)
+    
+    # string - contains
+    rv = client.get('/admin/model1/?flt0_2=test1_val_1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' in data)
+    ok_('test1_val_2' not in data)
+    
+    # string - not contains
+    rv = client.get('/admin/model1/?flt0_3=test1_val_1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' not in data)
+    ok_('test1_val_2' in data)
+    
+    # string - empty
+    rv = client.get('/admin/model1/?flt0_4=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('empty_obj' in data)
+    ok_('test1_val_1' not in data)
+    ok_('test1_val_2' not in data)
+    
+    # string - not empty
+    rv = client.get('/admin/model1/?flt0_4=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('empty_obj' not in data)
+    ok_('test1_val_1' in data)
+    ok_('test1_val_2' in data)
+    
+    # string - in list
+    rv = client.get('/admin/model1/?flt0_5=test1_val_1%2Ctest1_val_2')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' in data)
+    ok_('test2_val_2' in data)
+    ok_('test1_val_3' not in data)
+    ok_('test1_val_4' not in data)
+    
+    # string - not in list
+    rv = client.get('/admin/model1/?flt0_6=test1_val_1%2Ctest1_val_2')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' not in data)
+    ok_('test2_val_2' not in data)
+    ok_('test1_val_3' in data)
+    ok_('test1_val_4' in data)
+    
+    # Test int filter
+    view = CustomModelView(Model2, column_filters=['int_field'])
+    admin.add_view(view)
+    
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Int Field']],
+        [
+            (0, 'equals'),
+            (1, 'not equal'),
+            (2, 'greater than'),
+            (3, 'smaller than'),
+            (4, 'empty'),
+            (5, 'in list'),
+            (6, 'not in list'),
+        ])
+    
+    # integer - equals
+    rv = client.get('/admin/model2/?flt0_0=5000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_3' in data)
+    ok_('char_field_val_4' not in data)
+    
+    # integer - equals - test validation
+    rv = client.get('/admin/model2/?flt0_0=badval')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('Invalid Filter Value' in data)
+    
+    # integer - not equal
+    rv = client.get('/admin/model2/?flt0_1=5000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_3' not in data)
+    ok_('char_field_val_4' in data)
+    
+    # integer - greater
+    rv = client.get('/admin/model2/?flt0_2=6000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_3' not in data)
+    ok_('char_field_val_4' in data)
+    
+    # integer - smaller
+    rv = client.get('/admin/model2/?flt0_3=6000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_3' in data)
+    ok_('char_field_val_4' not in data)
+    
+    # integer - empty
+    rv = client.get('/admin/model2/?flt0_4=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_1' in data)
+    ok_('char_field_val_2' in data)
+    ok_('char_field_val_3' not in data)
+    ok_('char_field_val_4' not in data)
+    
+    # integer - not empty
+    rv = client.get('/admin/model2/?flt0_4=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_1' not in data)
+    ok_('char_field_val_2' not in data)
+    ok_('char_field_val_3' in data)
+    ok_('char_field_val_4' in data)
+    
+    # integer - in list
+    rv = client.get('/admin/model2/?flt0_5=5000%2C9000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_1' not in data)
+    ok_('char_field_val_2' not in data)
+    ok_('char_field_val_3' in data)
+    ok_('char_field_val_4' in data)
+    
+    # integer - in list - test validation
+    rv = client.get('/admin/model2/?flt0_5=5000%2Cbadval')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('Invalid Filter Value' in data)
+    
+    # integer - not in list
+    rv = client.get('/admin/model2/?flt0_6=5000%2C9000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_1' in data)
+    ok_('char_field_val_2' in data)
+    ok_('char_field_val_3' not in data)
+    ok_('char_field_val_4' not in data)
+    
+    # Test float filter
+    view = CustomModelView(Model2, column_filters=['float_field'], 
+                           endpoint="_float")
+    admin.add_view(view)
+    
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Float Field']],
+        [
+            (0, 'equals'),
+            (1, 'not equal'),
+            (2, 'greater than'),
+            (3, 'smaller than'),
+            (4, 'empty'),
+            (5, 'in list'),
+            (6, 'not in list'),
+        ])
+    
+    # float - equals
+    rv = client.get('/admin/_float/?flt0_0=25.9')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_3' in data)
+    ok_('char_field_val_4' not in data)
+    
+    # float - equals - test validation
+    rv = client.get('/admin/_float/?flt0_0=badval')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('Invalid Filter Value' in data)
+    
+    # float - not equal
+    rv = client.get('/admin/_float/?flt0_1=25.9')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_3' not in data)
+    ok_('char_field_val_4' in data)
+    
+    # float - greater
+    rv = client.get('/admin/_float/?flt0_2=60.5')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_3' not in data)
+    ok_('char_field_val_4' in data)
+    
+    # float - smaller
+    rv = client.get('/admin/_float/?flt0_3=60.5')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_3' in data)
+    ok_('char_field_val_4' not in data)
+    
+    # float - empty
+    rv = client.get('/admin/_float/?flt0_4=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_1' in data)
+    ok_('char_field_val_2' in data)
+    ok_('char_field_val_3' not in data)
+    ok_('char_field_val_4' not in data)
+    
+    # float - not empty
+    rv = client.get('/admin/_float/?flt0_4=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_1' not in data)
+    ok_('char_field_val_2' not in data)
+    ok_('char_field_val_3' in data)
+    ok_('char_field_val_4' in data)
+    
+    # float - in list
+    rv = client.get('/admin/_float/?flt0_5=25.9%2C75.5')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_1' not in data)
+    ok_('char_field_val_2' not in data)
+    ok_('char_field_val_3' in data)
+    ok_('char_field_val_4' in data)
+    
+    # float - in list - test validation
+    rv = client.get('/admin/_float/?flt0_5=25.9%2Cbadval')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('Invalid Filter Value' in data)
+    
+    # float - not in list
+    rv = client.get('/admin/_float/?flt0_6=25.9%2C75.5')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('char_field_val_1' in data)
+    ok_('char_field_val_2' in data)
+    ok_('char_field_val_3' not in data)
+    ok_('char_field_val_4' not in data)
+    
+    # Test date, time, and datetime filters
+    view = CustomModelView(Model1,
+                           column_filters=['date_field', 'datetime_field', 'timeonly_field'], 
+                           endpoint="_datetime")
+    admin.add_view(view)
+
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Date Field']],
+        [
+            (0, 'equals'),
+            (1, 'not equal'),
+            (2, 'greater than'),
+            (3, 'smaller than'),
+            (4, 'between'),
+            (5, 'not between'),
+            (6, 'empty'),
+        ])
+    
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Datetime Field']],
+        [
+            (7, 'equals'),
+            (8, 'not equal'),
+            (9, 'greater than'),
+            (10, 'smaller than'),
+            (11, 'between'),
+            (12, 'not between'),
+            (13, 'empty'),
+        ])
+    
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Timeonly Field']],
+        [
+            (14, 'equals'),
+            (15, 'not equal'),
+            (16, 'greater than'),
+            (17, 'smaller than'),
+            (18, 'between'),
+            (19, 'not between'),
+            (20, 'empty'),
+        ])
+        
+    # date - equals
+    rv = client.get('/admin/_datetime/?flt0_0=2014-11-17')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('date_obj1' in data)
+    ok_('date_obj2' not in data)
+    
+    # date - not equal
+    rv = client.get('/admin/_datetime/?flt0_1=2014-11-17')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('date_obj1' not in data)
+    ok_('date_obj2' in data)
+    
+    # date - greater
+    rv = client.get('/admin/_datetime/?flt0_2=2014-11-16')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('date_obj1' in data)
+    ok_('date_obj2' not in data)
+    
+    # date - smaller
+    rv = client.get('/admin/_datetime/?flt0_3=2014-11-16')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('date_obj1' not in data)
+    ok_('date_obj2' in data)
+    
+    # date - between
+    rv = client.get('/admin/_datetime/?flt0_4=2014-11-13+to+2014-11-20')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('date_obj1' in data)
+    ok_('date_obj2' not in data)
+    
+    # date - not between
+    rv = client.get('/admin/_datetime/?flt0_5=2014-11-13+to+2014-11-20')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('date_obj1' not in data)
+    ok_('date_obj2' in data)
+
+    # date - empty
+    rv = client.get('/admin/_datetime/?flt0_6=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_1' in data)
+    ok_('date_obj1' not in data)
+    ok_('date_obj2' not in data)
+    
+    # date - empty
+    rv = client.get('/admin/_datetime/?flt0_6=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_1' not in data)
+    ok_('date_obj1' in data)
+    ok_('date_obj2' in data)
+    
+    # datetime - equals
+    rv = client.get('/admin/_datetime/?flt0_7=2014-04-03+01%3A09%3A00')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' in data)
+    ok_('datetime_obj2' not in data)
+    
+    # datetime - not equal
+    rv = client.get('/admin/_datetime/?flt0_8=2014-04-03+01%3A09%3A00')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' not in data)
+    ok_('datetime_obj2' in data)
+    
+    # datetime - greater
+    rv = client.get('/admin/_datetime/?flt0_9=2014-04-03+01%3A08%3A00')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' in data)
+    ok_('datetime_obj2' not in data)
+    
+    # datetime - smaller
+    rv = client.get('/admin/_datetime/?flt0_10=2014-04-03+01%3A08%3A00')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' not in data)
+    ok_('datetime_obj2' in data)
+    
+    # datetime - between
+    rv = client.get('/admin/_datetime/?flt0_11=2014-04-02+00%3A00%3A00+to+2014-11-20+23%3A59%3A59')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' in data)
+    ok_('datetime_obj2' not in data)
+    
+    # datetime - not between
+    rv = client.get('/admin/_datetime/?flt0_12=2014-04-02+00%3A00%3A00+to+2014-11-20+23%3A59%3A59')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' not in data)
+    ok_('datetime_obj2' in data)
+    
+    # datetime - empty
+    rv = client.get('/admin/_datetime/?flt0_13=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_1' in data)
+    ok_('datetime_obj1' not in data)
+    ok_('datetime_obj2' not in data)
+    
+    # datetime - not empty
+    rv = client.get('/admin/_datetime/?flt0_13=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_1' not in data)
+    ok_('datetime_obj1' in data)
+    ok_('datetime_obj2' in data)
+    
+    # time - equals
+    rv = client.get('/admin/_datetime/?flt0_14=11%3A10%3A09')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('timeonly_obj1' in data)
+    ok_('timeonly_obj2' not in data)
+    
+    # time - not equal
+    rv = client.get('/admin/_datetime/?flt0_15=11%3A10%3A09')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('timeonly_obj1' not in data)
+    ok_('timeonly_obj2' in data)
+    
+    # time - greater
+    rv = client.get('/admin/_datetime/?flt0_16=11%3A09%3A09')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('timeonly_obj1' in data)
+    ok_('timeonly_obj2' not in data)
+    
+    # time - smaller
+    rv = client.get('/admin/_datetime/?flt0_17=11%3A09%3A09')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('timeonly_obj1' not in data)
+    ok_('timeonly_obj2' in data)
+    
+    # time - between
+    rv = client.get('/admin/_datetime/?flt0_18=10%3A40%3A00+to+11%3A50%3A59')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('timeonly_obj1' in data)
+    ok_('timeonly_obj2' not in data)
+    
+    # time - not between
+    rv = client.get('/admin/_datetime/?flt0_19=10%3A40%3A00+to+11%3A50%3A59')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('timeonly_obj1' not in data)
+    ok_('timeonly_obj2' in data)
+    
+    # time - empty
+    rv = client.get('/admin/_datetime/?flt0_20=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_1' in data)
+    ok_('timeonly_obj1' not in data)
+    ok_('timeonly_obj2' not in data)
+    
+    # time - not empty
+    rv = client.get('/admin/_datetime/?flt0_20=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_1' not in data)
+    ok_('timeonly_obj1' in data)
+    ok_('timeonly_obj2' in data)
+    
 def test_default_sort():
     app, db, admin = setup()
     M1, _ = create_models(db)
@@ -158,7 +761,7 @@ def test_extra_fields():
     view = CustomModelView(
         Model1,
         form_extra_fields={
-            'extra_field': fields.TextField('Extra Field')
+            'extra_field': fields.StringField('Extra Field')
         }
     )
     admin.add_view(view)

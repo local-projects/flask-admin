@@ -2,7 +2,6 @@ from wtforms import fields, validators
 from sqlalchemy import Boolean, Column
 
 from flask.ext.admin import form
-from flask.ext.admin.form import Select2Field
 from flask.ext.admin.model.form import (converts, ModelConverterBase,
                                         InlineModelConverterBase, FieldPlaceholder)
 from flask.ext.admin.model.fields import AjaxSelectField, AjaxSelectMultipleField
@@ -12,7 +11,7 @@ from flask.ext.admin._compat import iteritems
 
 from .validators import Unique
 from .fields import QuerySelectField, QuerySelectMultipleField, InlineModelFormList
-from .tools import is_inherited_primary_key, get_column_for_current_model, has_multiple_pks
+from .tools import has_multiple_pks, filter_foreign_columns
 from .ajax import create_ajax_loader
 
 try:
@@ -111,10 +110,13 @@ class AdminModelConverter(ModelConverterBase):
         kwargs['label'] = self._get_label(prop.key, kwargs)
         kwargs['description'] = self._get_description(prop.key, kwargs)
 
-        if column.nullable or prop.direction.name != 'MANYTOONE':
-            kwargs['validators'].append(validators.Optional())
-        else:
-            kwargs['validators'].append(validators.InputRequired())
+        # determine optional/required, or respect existing
+        requirement_options = (validators.Optional, validators.InputRequired)
+        if not any(isinstance(v, requirement_options) for v in kwargs['validators']):
+            if column.nullable or prop.direction.name != 'MANYTOONE':
+                kwargs['validators'].append(validators.Optional())
+            else:
+                kwargs['validators'].append(validators.InputRequired())
 
         # Contribute model-related parameters
         if 'allow_blank' not in kwargs:
@@ -152,11 +154,13 @@ class AdminModelConverter(ModelConverterBase):
             # Ignore pk/fk
             if hasattr(prop, 'columns'):
                 # Check if more than one column mapped to the property
-                if len(prop.columns) != 1:
-                    if is_inherited_primary_key(prop):
-                        column = get_column_for_current_model(prop)
-                    else:
+                if len(prop.columns) > 1:
+                    columns = filter_foreign_columns(model.__table__, prop.columns)
+
+                    if len(columns) > 1:
                         raise TypeError('Can not convert multiple-column properties (%s.%s)' % (model, prop.key))
+
+                    column = columns[0]
                 else:
                     # Grab column
                     column = prop.columns[0]
@@ -238,7 +242,7 @@ class AdminModelConverter(ModelConverterBase):
                 if mapper.class_ == self.view.model and form_choices:
                     choices = form_choices.get(column.key)
                     if choices:
-                        return Select2Field(
+                        return form.Select2Field(
                             choices=choices,
                             allow_blank=column.nullable,
                             **kwargs
@@ -273,7 +277,7 @@ class AdminModelConverter(ModelConverterBase):
             field_args['filters'] = filters
 
         self._string_common(column=column, field_args=field_args, **extra)
-        return fields.TextField(**field_args)
+        return fields.StringField(**field_args)
 
     @converts('Text', 'UnicodeText',
               'sqlalchemy.types.LargeBinary', 'sqlalchemy.types.Binary')
@@ -292,8 +296,7 @@ class AdminModelConverter(ModelConverterBase):
 
     @converts('DateTime')
     def convert_datetime(self, field_args, **extra):
-        field_args['widget'] = form.DateTimePickerWidget()
-        return DateTimeField(**field_args)
+        return form.DateTimeField(**field_args)
 
     @converts('Time')
     def convert_time(self, field_args, **extra):
@@ -316,25 +319,25 @@ class AdminModelConverter(ModelConverterBase):
     @converts('databases.mysql.MSYear')
     def conv_MSYear(self, field_args, **extra):
         field_args['validators'].append(validators.NumberRange(min=1901, max=2155))
-        return fields.TextField(**field_args)
+        return fields.StringField(**field_args)
 
     @converts('databases.postgres.PGInet', 'dialects.postgresql.base.INET')
     def conv_PGInet(self, field_args, **extra):
         field_args.setdefault('label', u'IP Address')
         field_args['validators'].append(validators.IPAddress())
-        return fields.TextField(**field_args)
+        return fields.StringField(**field_args)
 
     @converts('dialects.postgresql.base.MACADDR')
     def conv_PGMacaddr(self, field_args, **extra):
         field_args.setdefault('label', u'MAC Address')
         field_args['validators'].append(validators.MacAddress())
-        return fields.TextField(**field_args)
+        return fields.StringField(**field_args)
 
     @converts('dialects.postgresql.base.UUID')
     def conv_PGUuid(self, field_args, **extra):
         field_args.setdefault('label', u'UUID')
         field_args['validators'].append(validators.UUID())
-        return fields.TextField(**field_args)
+        return fields.StringField(**field_args)
 
     @converts('sqlalchemy.dialects.postgresql.base.ARRAY')
     def conv_ARRAY(self, field_args, **extra):
@@ -603,6 +606,10 @@ class InlineModelConverter(InlineModelConverterBase):
         label = self.get_label(info, forward_prop.key)
         if label:
             kwargs['label'] = label
+
+        if self.view.form_args:
+            field_args = self.view.form_args.get(forward_prop.key, {})
+            kwargs.update(**field_args)
 
         # Contribute field
         setattr(form_class,

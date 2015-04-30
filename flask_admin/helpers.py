@@ -1,10 +1,10 @@
 from re import sub
 from jinja2 import contextfunction
-from flask import g, request
+from flask import g, request, url_for, flash
 from wtforms.validators import DataRequired, InputRequired
 
-from flask.ext.admin._compat import urljoin, urlparse
-
+from flask.ext.admin._compat import urljoin, urlparse, iteritems
+from flask.ext.admin.babel import gettext
 
 from ._compat import string_types
 
@@ -18,6 +18,25 @@ def get_current_view():
         Get current administrative view.
     """
     return getattr(g, '_admin_view', None)
+
+
+def get_url(endpoint, **kwargs):
+    """
+        Alternative to Flask `url_for`.
+        If there's current administrative view, will call its `get_url`. If there's none - will
+        use generic `url_for`.
+
+        :param endpoint:
+            Endpoint name
+        :param kwargs:
+            View arguments
+    """
+    view = get_current_view()
+
+    if not view:
+        return url_for(endpoint, **kwargs)
+
+    return view.get_url(endpoint, **kwargs)
 
 
 def is_required_form_field(field):
@@ -37,7 +56,7 @@ def is_form_submitted():
     """
         Check if current method is PUT or POST
     """
-    return request and request.method in ("PUT", "POST")
+    return request and request.method in ('PUT', 'POST')
 
 
 def validate_form_on_submit(form):
@@ -74,7 +93,12 @@ def is_field_error(errors):
             return True
 
     return False
-
+    
+    
+def flash_errors(form, message):
+    for field_name, errors in iteritems(form.errors):
+        errors = form[field_name].label.text + u": " + u", ".join(errors)
+        flash(gettext(message, error=str(errors)), 'error')
 
 @contextfunction
 def resolve_ctx(context):

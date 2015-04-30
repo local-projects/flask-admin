@@ -25,7 +25,7 @@ class QueryAjaxModelLoader(AjaxModelLoader):
 
         primary_keys = model._sa_class_manager.mapper.primary_key
         if len(primary_keys) > 1:
-            raise NotImplemented('Flask-Admin does not support multi-pk AJAX model loading.')
+            raise NotImplementedError('Flask-Admin does not support multi-pk AJAX model loading.')
 
         self.pk = primary_keys[0].name
 
@@ -58,7 +58,7 @@ class QueryAjaxModelLoader(AjaxModelLoader):
     def get_list(self, term, offset=0, limit=DEFAULT_PAGE_SIZE):
         query = self.session.query(self.model)
 
-        filters = (field.like(u'%%%s%%' % term) for field in self._cached_fields)
+        filters = (field.ilike(u'%%%s%%' % term) for field in self._cached_fields)
         query = query.filter(or_(*filters))
 
         return query.offset(offset).limit(limit).all()

@@ -32,12 +32,12 @@
                 </th>
                 {% endif %}
                 <th class="span1">&nbsp;</th>
-                <th>Name</th>
-                <th>Size</th>
+                <th>{{ _gettext('Name') }}</th>
+                <th>{{ _gettext('Size') }}</th>
                 {% endblock %}
             </tr>
         </thead>
-        {% for name, path, is_dir, size in items %}
+        {% for name, path, is_dir, size, date in items %}
         <tr>
             {% block list_row scoped %}
             {% if actions %}
@@ -50,23 +50,25 @@
             <td>
                 {% block list_row_actions scoped %}
                 {% if admin_view.can_rename and path and name != '..' %}
-                <a class="icon" href="{{ url_for('.rename', path=path) }}">
+                <a class="icon" href="{{ get_url('.rename', path=path) }}">
                         <i class="icon-pencil"></i>
                 </a>
                 {% endif %}
                 {%- if admin_view.can_delete and path -%}
                     {% if is_dir %}
                         {% if name != '..' and admin_view.can_delete_dirs %}
-                        <form class="icon" method="POST" action="{{ url_for('.delete') }}">
-                            <input type="hidden" name="path" value="{{ path }}"></input>
+                        <form class="icon" method="POST" action="{{ get_url('.delete') }}">
+                            {{ delete_form.path(value=path) }}
+                            {{ delete_form.csrf_token }}
                             <button onclick="return confirm('{{ _gettext('Are you sure you want to delete \\\'%(name)s\\\' recursively?', name=name) }}')">
                                 <i class="icon-remove"></i>
                             </button>
                         </form>
                         {% endif %}
                     {% else %}
-                    <form class="icon" method="POST" action="{{ url_for('.delete') }}">
-                        <input type="hidden" name="path" value="{{ path }}"></input>
+                    <form class="icon" method="POST" action="{{ get_url('.delete') }}">
+                        {{ delete_form.path(value=path) }}
+                        {{ delete_form.csrf_token }}
                         <button onclick="return confirm('{{ _gettext('Are you sure you want to delete \\\'%(name)s\\\'?', name=name) }}')">
                             <i class="icon-remove"></i>
                         </button>
@@ -118,7 +120,7 @@
     </div>
     {% endblock %}
     {% block actions %}
-    {{ actionslib.form(actions, url_for('.action_view')) }}
+    {{ actionslib.form(actions, get_url('.action_view')) }}
     {% endblock %}
 {% endblock %}
 

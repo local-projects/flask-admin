@@ -13,6 +13,7 @@ from flask.ext.admin.contrib.mongoengine import ModelView
 
 from . import setup
 
+from datetime import datetime
 
 class CustomModelView(ModelView):
     def __init__(self, model,
@@ -32,15 +33,39 @@ def create_models(db):
         test2 = db.StringField(max_length=20)
         test3 = db.StringField()
         test4 = db.StringField()
+        datetime_field = db.DateTimeField()
 
+        def __str__(self):
+            return self.test1
+            
     class Model2(db.Document):
+        string_field = db.StringField()
         int_field = db.IntField()
+        float_field = db.FloatField()
         bool_field = db.BooleanField()
+        
+        model1 = db.ReferenceField(Model1)
 
     Model1.objects.delete()
     Model2.objects.delete()
 
     return Model1, Model2
+
+
+def fill_db(Model1, Model2):
+    Model1('test1_val_1', 'test2_val_1').save()
+    Model1('test1_val_2', 'test2_val_2').save()
+    Model1('test1_val_3', 'test2_val_3').save()
+    Model1('test1_val_4', 'test2_val_4').save()
+    Model1(None, 'empty_obj').save()
+
+    Model2('string_field_val_1', None, None).save()
+    Model2('string_field_val_2', None, None).save()
+    Model2('string_field_val_3', 5000, 25.9).save()
+    Model2('string_field_val_4', 9000, 75.5).save()
+
+    Model1('datetime_obj1', datetime_field=datetime(2014,4,3,1,9,0)).save()
+    Model1('datetime_obj2', datetime_field=datetime(2013,3,2,0,8,0)).save()
 
 
 def test_model():
@@ -67,14 +92,8 @@ def test_model():
     eq_(view._search_supported, False)
     eq_(view._filters, None)
 
-    # Verify form
-    # TODO: Figure out why there's inconsistency
-    try:
-        eq_(view._create_form_class.test1.field_class, fields.TextField)
-        eq_(view._create_form_class.test2.field_class, fields.TextField)
-    except AssertionError:
-        eq_(view._create_form_class.test1.field_class, fields.StringField)
-        eq_(view._create_form_class.test2.field_class, fields.StringField)
+    eq_(view._create_form_class.test1.field_class, fields.StringField)
+    eq_(view._create_form_class.test2.field_class, fields.StringField)
 
     eq_(view._create_form_class.test3.field_class, fields.TextAreaField)
     eq_(view._create_form_class.test4.field_class, fields.TextAreaField)
@@ -122,6 +141,426 @@ def test_model():
     eq_(Model1.objects.count(), 0)
 
 
+def test_column_editable_list():
+    app, db, admin = setup()
+
+    Model1, Model2 = create_models(db)
+
+    view = CustomModelView(Model1,
+                           column_editable_list=[
+                               'test1', 'datetime_field'])
+    admin.add_view(view)
+
+    fill_db(Model1, Model2)
+
+    client = app.test_client()
+
+    # Test in-line edit field rendering
+    rv = client.get('/admin/model1/')
+    data = rv.data.decode('utf-8')
+    ok_('data-role="x-editable"' in data)
+
+    # Form - Test basic in-line edit functionality
+    obj1 = Model1.objects.get(test1 = 'test1_val_3')
+    rv = client.post('/admin/model1/ajax/update/', data={
+        'test1-' + str(obj1.id): 'change-success-1',
+    })
+    data = rv.data.decode('utf-8')
+    ok_('Record was successfully saved.' == data)
+
+    # confirm the value has changed
+    rv = client.get('/admin/model1/')
+    data = rv.data.decode('utf-8')
+    ok_('change-success-1' in data)
+
+    # Test validation error
+    obj2 = Model1.objects.get(test1 = 'datetime_obj1')
+    rv = client.post('/admin/model1/ajax/update/', data={
+        'datetime_field-' + str(obj2.id): 'problematic-input',
+    })
+    eq_(rv.status_code, 500)
+    
+    # Test invalid primary key
+    rv = client.post('/admin/model1/ajax/update/', data={
+        'test1-1000': 'problematic-input',
+    })
+    data = rv.data.decode('utf-8')
+    eq_(rv.status_code, 500)
+    
+    # Test editing column not in column_editable_list
+    rv = client.post('/admin/model1/ajax/update/', data={
+        'test2-1': 'problematic-input',
+    })
+    data = rv.data.decode('utf-8')
+    eq_(rv.status_code, 500)
+    
+    # Test in-line editing for relations
+    view = CustomModelView(Model2,
+                           column_editable_list=[
+                               'model1'])
+    admin.add_view(view)
+    
+    obj3 = Model2.objects.get(string_field = 'string_field_val_1')
+    rv = client.post('/admin/model2/ajax/update/', data={
+        'model1-' + str(obj3.id): str(obj1.id),
+    })
+    data = rv.data.decode('utf-8')
+    ok_('Record was successfully saved.' == data)
+
+    # confirm the value has changed
+    rv = client.get('/admin/model2/')
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_1' in data)
+
+
+def test_column_filters():
+    app, db, admin = setup()
+    
+    Model1, Model2 = create_models(db)
+    
+    # fill DB with values
+    fill_db(Model1, Model2)
+
+    # Test string filter
+    view = CustomModelView(Model1, column_filters=['test1'])
+    admin.add_view(view)
+    
+    eq_(len(view._filters), 7)
+
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Test1']],
+        [
+            (0, 'equals'),
+            (1, 'not equal'),
+            (2, 'contains'),
+            (3, 'not contains'),
+            (4, 'empty'),
+            (5, 'in list'),
+            (6, 'not in list'),
+        ])
+        
+    # Make some test clients
+    client = app.test_client()
+    
+    # string - equals
+    rv = client.get('/admin/model1/?flt0_0=test1_val_1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' in data)
+    ok_('test1_val_2' not in data)
+    
+    # string - not equal
+    rv = client.get('/admin/model1/?flt0_1=test1_val_1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' not in data)
+    ok_('test1_val_2' in data)
+    
+    # string - contains
+    rv = client.get('/admin/model1/?flt0_2=test1_val_1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' in data)
+    ok_('test1_val_2' not in data)
+    
+    # string - not contains
+    rv = client.get('/admin/model1/?flt0_3=test1_val_1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' not in data)
+    ok_('test1_val_2' in data)
+    
+    # string - empty
+    rv = client.get('/admin/model1/?flt0_4=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('empty_obj' in data)
+    ok_('test1_val_1' not in data)
+    ok_('test1_val_2' not in data)
+    
+    # string - not empty
+    rv = client.get('/admin/model1/?flt0_4=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('empty_obj' not in data)
+    ok_('test1_val_1' in data)
+    ok_('test1_val_2' in data)
+    
+    # string - in list
+    rv = client.get('/admin/model1/?flt0_5=test1_val_1%2Ctest1_val_2')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' in data)
+    ok_('test2_val_2' in data)
+    ok_('test1_val_3' not in data)
+    ok_('test1_val_4' not in data)
+    
+    # string - not in list
+    rv = client.get('/admin/model1/?flt0_6=test1_val_1%2Ctest1_val_2')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test2_val_1' not in data)
+    ok_('test2_val_2' not in data)
+    ok_('test1_val_3' in data)
+    ok_('test1_val_4' in data)
+    
+    # Test numeric filter
+    view = CustomModelView(Model2, column_filters=['int_field'])
+    admin.add_view(view)
+    
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Int Field']],
+        [
+            (0, 'equals'),
+            (1, 'not equal'),
+            (2, 'greater than'),
+            (3, 'smaller than'),
+            (4, 'empty'),
+            (5, 'in list'),
+            (6, 'not in list'),
+        ])
+    
+    # integer - equals
+    rv = client.get('/admin/model2/?flt0_0=5000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_3' in data)
+    ok_('string_field_val_4' not in data)
+    
+    # integer - equals - test validation
+    rv = client.get('/admin/model2/?flt0_0=badval')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('Invalid Filter Value' in data)
+    
+    # integer - not equal
+    rv = client.get('/admin/model2/?flt0_1=5000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_3' not in data)
+    ok_('string_field_val_4' in data)
+    
+    # integer - greater
+    rv = client.get('/admin/model2/?flt0_2=6000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_3' not in data)
+    ok_('string_field_val_4' in data)
+    
+    # integer - smaller
+    rv = client.get('/admin/model2/?flt0_3=6000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_3' in data)
+    ok_('string_field_val_4' not in data)
+    
+    # integer - empty
+    rv = client.get('/admin/model2/?flt0_4=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' in data)
+    ok_('string_field_val_2' in data)
+    ok_('string_field_val_3' not in data)
+    ok_('string_field_val_4' not in data)
+    
+    # integer - not empty
+    rv = client.get('/admin/model2/?flt0_4=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' not in data)
+    ok_('string_field_val_2' not in data)
+    ok_('string_field_val_3' in data)
+    ok_('string_field_val_4' in data)
+    
+    # integer - in list
+    rv = client.get('/admin/model2/?flt0_5=5000%2C9000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' not in data)
+    ok_('string_field_val_2' not in data)
+    ok_('string_field_val_3' in data)
+    ok_('string_field_val_4' in data)
+    
+    # integer - in list - test validation
+    rv = client.get('/admin/model2/?flt0_5=5000%2Cbadval')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('Invalid Filter Value' in data)
+    
+    # integer - not in list
+    rv = client.get('/admin/model2/?flt0_6=5000%2C9000')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' in data)
+    ok_('string_field_val_2' in data)
+    ok_('string_field_val_3' not in data)
+    ok_('string_field_val_4' not in data)
+    
+    # Test float filter
+    view = CustomModelView(Model2, column_filters=['float_field'], 
+                           endpoint="_float")
+    admin.add_view(view)
+    
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Float Field']],
+        [
+            (0, 'equals'),
+            (1, 'not equal'),
+            (2, 'greater than'),
+            (3, 'smaller than'),
+            (4, 'empty'),
+            (5, 'in list'),
+            (6, 'not in list'),
+        ])
+    
+    # float - equals
+    rv = client.get('/admin/_float/?flt0_0=25.9')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_3' in data)
+    ok_('string_field_val_4' not in data)
+    
+    # float - equals - test validation
+    rv = client.get('/admin/_float/?flt0_0=badval')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('Invalid Filter Value' in data)
+    
+    # float - not equal
+    rv = client.get('/admin/_float/?flt0_1=25.9')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_3' not in data)
+    ok_('string_field_val_4' in data)
+    
+    # float - greater
+    rv = client.get('/admin/_float/?flt0_2=60.5')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_3' not in data)
+    ok_('string_field_val_4' in data)
+    
+    # float - smaller
+    rv = client.get('/admin/_float/?flt0_3=60.5')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_3' in data)
+    ok_('string_field_val_4' not in data)
+    
+    # float - empty
+    rv = client.get('/admin/_float/?flt0_4=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' in data)
+    ok_('string_field_val_2' in data)
+    ok_('string_field_val_3' not in data)
+    ok_('string_field_val_4' not in data)
+    
+    # float - not empty
+    rv = client.get('/admin/_float/?flt0_4=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' not in data)
+    ok_('string_field_val_2' not in data)
+    ok_('string_field_val_3' in data)
+    ok_('string_field_val_4' in data)
+    
+    # float - in list
+    rv = client.get('/admin/_float/?flt0_5=25.9%2C75.5')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' not in data)
+    ok_('string_field_val_2' not in data)
+    ok_('string_field_val_3' in data)
+    ok_('string_field_val_4' in data)
+    
+    # float - in list - test validation
+    rv = client.get('/admin/_float/?flt0_5=25.9%2Cbadval')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('Invalid Filter Value' in data)
+    
+    # float - not in list
+    rv = client.get('/admin/_float/?flt0_6=25.9%2C75.5')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' in data)
+    ok_('string_field_val_2' in data)
+    ok_('string_field_val_3' not in data)
+    ok_('string_field_val_4' not in data)
+    
+    # Test datetime filter
+    view = CustomModelView(Model1,
+                           column_filters=['datetime_field'], 
+                           endpoint="_datetime")
+    admin.add_view(view)
+    
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Datetime Field']],
+        [
+            (0, 'equals'),
+            (1, 'not equal'),
+            (2, 'greater than'),
+            (3, 'smaller than'),
+            (4, 'between'),
+            (5, 'not between'),
+            (6, 'empty'),
+        ])
+    
+    # datetime - equals
+    rv = client.get('/admin/_datetime/?flt0_0=2014-04-03+01%3A09%3A00')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' in data)
+    ok_('datetime_obj2' not in data)
+    
+    # datetime - not equal
+    rv = client.get('/admin/_datetime/?flt0_1=2014-04-03+01%3A09%3A00')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' not in data)
+    ok_('datetime_obj2' in data)
+    
+    # datetime - greater
+    rv = client.get('/admin/_datetime/?flt0_2=2014-04-03+01%3A08%3A00')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' in data)
+    ok_('datetime_obj2' not in data)
+    
+    # datetime - smaller
+    rv = client.get('/admin/_datetime/?flt0_3=2014-04-03+01%3A08%3A00')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' not in data)
+    ok_('datetime_obj2' in data)
+    
+    # datetime - between
+    rv = client.get('/admin/_datetime/?flt0_4=2014-04-02+00%3A00%3A00+to+2014-11-20+23%3A59%3A59')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' in data)
+    ok_('datetime_obj2' not in data)
+    
+    # datetime - not between
+    rv = client.get('/admin/_datetime/?flt0_5=2014-04-02+00%3A00%3A00+to+2014-11-20+23%3A59%3A59')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('datetime_obj1' not in data)
+    ok_('datetime_obj2' in data)
+    
+    # datetime - empty
+    rv = client.get('/admin/_datetime/?flt0_6=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_1' in data)
+    ok_('datetime_obj1' not in data)
+    ok_('datetime_obj2' not in data)
+    
+    # datetime - not empty
+    rv = client.get('/admin/_datetime/?flt0_6=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('test1_val_1' not in data)
+    ok_('datetime_obj1' in data)
+    ok_('datetime_obj2' in data)
+    
 def test_default_sort():
     app, db, admin = setup()
     M1, _ = create_models(db)
@@ -150,7 +589,7 @@ def test_extra_fields():
     view = CustomModelView(
         Model1,
         form_extra_fields={
-            'extra_field': fields.TextField('Extra Field')
+            'extra_field': fields.StringField('Extra Field')
         }
     )
     admin.add_view(view)
@@ -177,7 +616,7 @@ def test_extra_field_order():
         Model1,
         form_columns=('extra_field', 'test1'),
         form_extra_fields={
-            'extra_field': fields.TextField('Extra Field')
+            'extra_field': fields.StringField('Extra Field')
         }
     )
     admin.add_view(view)
@@ -355,21 +794,7 @@ def test_nested_list_subdocument():
 def test_ajax_fk():
     app, db, admin = setup()
 
-    class Model1(db.Document):
-        test1 = db.StringField(max_length=20)
-        test2 = db.StringField(max_length=20)
-
-        def __str__(self):
-            return self.test1
-
-    class Model2(db.Document):
-        int_field = db.IntField()
-        bool_field = db.BooleanField()
-
-        model1 = db.ReferenceField(Model1)
-
-    Model1.objects.delete()
-    Model2.objects.delete()
+    Model1, Model2 = create_models(db)
 
     view = CustomModelView(
         Model2,

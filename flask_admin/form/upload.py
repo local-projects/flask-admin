@@ -1,8 +1,6 @@
 import os
 import os.path as op
 
-from flask import url_for
-
 from werkzeug import secure_filename
 from werkzeug.datastructures import FileStorage
 
@@ -15,6 +13,7 @@ except ImportError:
     from wtforms.utils import unset_value
 
 from flask.ext.admin.babel import gettext
+from flask.ext.admin.helpers import get_url
 
 from flask.ext.admin._compat import string_types, urljoin
 
@@ -106,15 +105,15 @@ class ImageUploadInput(object):
         if field.url_relative_path:
             filename = urljoin(field.url_relative_path, filename)
 
-        return url_for(field.endpoint, filename=filename)
+        return get_url(field.endpoint, filename=filename)
 
 
 # Fields
-class FileUploadField(fields.TextField):
+class FileUploadField(fields.StringField):
     """
         Customizable file-upload field.
 
-        Saves file to configured path, handles updates and deletions. Inherits from `TextField`,
+        Saves file to configured path, handles updates and deletions. Inherits from `StringField`,
         resulting filename will be stored as string.
     """
     widget = FileUploadInput()
@@ -180,10 +179,13 @@ class FileUploadField(fields.TextField):
                 filename.rsplit('.', 1)[1].lower() in
                 map(lambda x: x.lower(), self.allowed_extensions))
 
+    def _is_uploaded_file(self, data):
+        return (data
+                and isinstance(data, FileStorage)
+                and data.filename)
+
     def pre_validate(self, form):
-        if (self.data and
-                isinstance(self.data, FileStorage) and
-                not self.is_file_allowed(self.data.filename)):
+        if self._is_uploaded_file(self.data) and not self.is_file_allowed(self.data.filename):
             raise ValidationError(gettext('Invalid file extension'))
 
     def process(self, formdata, data=unset_value):
@@ -194,6 +196,15 @@ class FileUploadField(fields.TextField):
 
         return super(FileUploadField, self).process(formdata, data)
 
+    def process_formdata(self, valuelist):
+        if self._should_delete:
+            self.data = None
+        elif valuelist:
+            data = valuelist[0]
+
+            if self._is_uploaded_file(data):
+                self.data = data
+
     def populate_obj(self, obj, name):
         field = getattr(obj, name, None)
         if field:
@@ -203,7 +214,7 @@ class FileUploadField(fields.TextField):
                 setattr(obj, name, None)
                 return
 
-        if self.data and isinstance(self.data, FileStorage):
+        if self._is_uploaded_file(self.data):
             if field:
                 self._delete_file(field)
 
@@ -226,6 +237,8 @@ class FileUploadField(fields.TextField):
         if not self.base_path:
             raise ValueError('FileUploadField field requires base_path to be set.')
 
+        if callable(self.base_path):
+            return op.join(self.base_path(), filename)
         return op.join(self.base_path, filename)
 
     def _delete_file(self, filename):
@@ -237,7 +250,7 @@ class FileUploadField(fields.TextField):
     def _save_file(self, data, filename):
         path = self._get_path(filename)
         if not op.exists(op.dirname(path)):
-            os.makedirs(os.path.dirname(path), self.permission)
+            os.makedirs(os.path.dirname(path), self.permission | 0o111)
 
         data.save(path)
 
@@ -355,7 +368,7 @@ class ImageUploadField(FileUploadField):
     def pre_validate(self, form):
         super(ImageUploadField, self).pre_validate(form)
 
-        if self.data and isinstance(self.data, FileStorage):
+        if self._is_uploaded_file(self.data):
             try:
                 self.image = Image.open(self.data)
             except Exception as e:
@@ -392,7 +405,7 @@ class ImageUploadField(FileUploadField):
             self._save_image(image, self._get_path(filename), format)
         else:
             data.seek(0)
-            data.save(path)
+            data.save(self._get_path(filename))
 
         self._save_thumbnail(data, filename, format)
 

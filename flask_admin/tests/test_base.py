@@ -1,6 +1,6 @@
 from nose.tools import ok_, eq_, raises
 
-from flask import Flask, request
+from flask import Flask, request, abort, url_for
 from flask.views import MethodView
 from flask.ext.admin import base
 
@@ -132,6 +132,11 @@ def test_admin_customizations():
     client = app.test_client()
     rv = client.get('/foobar/')
     eq_(rv.status_code, 200)
+    
+    # test custom static_url_path
+    with app.test_request_context('/'):
+        rv = client.get(url_for('admin.static', filename='bootstrap/bootstrap2/css/bootstrap.css'))
+    eq_(rv.status_code, 200)    
 
 
 def test_baseview_registration():
@@ -230,6 +235,20 @@ def test_permissions():
 
     rv = client.get('/admin/mockview/')
     eq_(rv.status_code, 403)
+
+
+def test_inaccessible_callback():
+    app = Flask(__name__)
+    admin = base.Admin(app)
+    view = MockView()
+    admin.add_view(view)
+    client = app.test_client()
+
+    view.allow_access = False
+    view.inaccessible_callback = lambda *args, **kwargs: abort(418)
+
+    rv = client.get('/admin/mockview/')
+    eq_(rv.status_code, 418)
 
 
 def get_visibility():
@@ -345,6 +364,11 @@ def test_root_mount():
     client = app.test_client()
     rv = client.get('/mockview/')
     eq_(rv.data, b'Success!')
+    
+    # test static files when url='/'
+    with app.test_request_context('/'):
+        rv = client.get(url_for('admin.static', filename='bootstrap/bootstrap2/css/bootstrap.css'))
+    eq_(rv.status_code, 200)
 
 
 def test_menu_links():

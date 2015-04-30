@@ -165,45 +165,18 @@ have access to the view in question::
         def is_accessible(self):
             return login.current_user.is_authenticated()
 
-You can also implement policy-based security, conditionally allowing or disallowing access to parts of the
-administrative interface. If a user does not have access to a particular view, the menu item won't be visible.
-
-Generating URLs
----------------
-
-Internally, view classes work on top of Flask blueprints, so you can use *url_for* with a dot
-prefix to get the URL for a local view::
-
-    from flask import url_for
+To redirect the user to another page if authentication fails, you will need to specify an *_handle_view* method::
 
     class MyView(BaseView):
-        @expose('/')
-        def index(self)
-            # Get URL for the test view method
-            url = url_for('.test')
-            return self.render('index.html', url=url)
+        def is_accessible(self):
+            return login.current_user.is_authenticated()
+            
+        def _handle_view(self, name, **kwargs):
+            if not self.is_accessible():
+                return redirect(url_for('login', next=request.url))
 
-        @expose('/test/')
-        def test(self):
-            return self.render('test.html')
-
-If you want to generate a URL for a particular view method from outside, the following rules apply:
-
-1. You can override the endpoint name by passing *endpoint* parameter to the view class constructor::
-
-    admin = Admin(app)
-    admin.add_view(MyView(endpoint='testadmin'))
-
-    In this case, you can generate links by concatenating the view method name with an endpoint::
-
-    url_for('testadmin.index')
-
-2. If you don't override the endpoint name, the lower-case class name can be used for generating URLs, like in::
-
-    url_for('myview.index')
-
-3. For model-based views the rules differ - the model class name should be used if an endpoint name is not provided. Model-based views will be explained in the next section.
-
+You can also implement policy-based security, conditionally allowing or disallowing access to parts of the
+administrative interface. If a user does not have access to a particular view, the menu item won't be visible.
 
 Model Views
 -----------
@@ -274,7 +247,7 @@ administrative views.
 File Admin
 ----------
 
-Flask-Admin comes with another handy battery - file admin. It gives you ability to manage files on your server
+Flask-Admin comes with another handy battery - file admin. It gives you the ability to manage files on your server
 (upload, delete, rename, etc).
 
 Here is simple example::
@@ -299,14 +272,86 @@ Sample screenshot:
 You can disable uploads, disable file or directory deletion, restrict file uploads to certain types and so on.
 Check :mod:`flask.ext.admin.contrib.fileadmin` documentation on how to do it.
 
+Generating URLs
+---------------
+
+Internally, view classes work on top of Flask blueprints, so you can use *url_for* with a dot
+prefix to get the URL for a local view::
+
+    from flask import url_for
+
+    class MyView(BaseView):
+        @expose('/')
+        def index(self)
+            # Get URL for the test view method
+            url = url_for('.test')
+            return self.render('index.html', url=url)
+
+        @expose('/test/')
+        def test(self):
+            return self.render('test.html')
+
+If you want to generate a URL for a particular view method from outside, the following rules apply:
+
+1. You can override the endpoint name by passing *endpoint* parameter to the view class constructor::
+
+    admin = Admin(app)
+    admin.add_view(MyView(endpoint='testadmin'))
+
+    In this case, you can generate links by concatenating the view method name with an endpoint::
+
+    url_for('testadmin.index')
+
+2. If you don't override the endpoint name, the lower-case class name can be used for generating URLs, like in::
+
+    url_for('myview.index')
+
+3. For model-based views the rules differ - the model class name should be used if an endpoint name is not provided. The ModelView also has these endpoints by default: *.index_view*, *.create_view*, and *.edit_view*. So, the following urls can be generated for a model named "User"::
+
+    # List View
+    url_for('user.index_view')
+    
+    # Create View (redirect back to index_view)
+    url_for('user.create_view', url=url_for('user.index_view'))
+    
+    # Edit View for record #1 (redirect back to index_view)
+    url_for('user.edit_view', id=1, url=url_for('user.index_view'))
+
 Examples
 --------
 
-Flask-Admin comes with few examples:
+Flask-Admin comes with several examples, that will really help you get a grip on what's possible.
+Browse through them in the GitHub repo, and then run them locally to get yourself up to speed in no time:
 
-- `Simple administrative interface <https://github.com/MrJoes/Flask-Admin/tree/master/examples/simple>`_ with custom administrative views
+- `Simple views <https://github.com/MrJoes/Flask-Admin/tree/master/examples/simple>`_
+    Here we show how to add some simple custom views to your admin interface. They don't have to
+    be associated to any of your database models. You can fill them with whatever content you want.
+
+- `Custom layout <https://github.com/MrJoes/Flask-Admin/tree/master/examples/layout>`_
+    Override some of the built-in templates to get complete control over the look and feel of your Admin interface. Either
+    while using the default Bootstrap 2, or the newer `Bootstrap 3 <https://github.com/MrJoes/Flask-Admin/tree/master/examples/layout-bootstrap3>`_.
+
 - `SQLAlchemy model example <https://github.com/MrJoes/Flask-Admin/tree/master/examples/sqla>`_
+    Model-based views provide heaps of builtin goodness, making it really easy to get a set of the default CRUD views in place.
+    This example shows some of the basics.
+
+- `SQLAlchemy model views with custom forms and file handling <https://github.com/MrJoes/Flask-Admin/tree/master/examples/forms>`_
+    Here, we show some of the more interesting things you can do with very little effort, including customizing the
+    builtin forms, and adding support for handling file/image uploads.
+
 - `Flask-Login integration example <https://github.com/MrJoes/Flask-Admin/tree/master/examples/auth>`_
-- `File management interface <https://github.com/MrJoes/Flask-Admin/tree/master/examples/file>`_
+    Use Flask-Login for authentication to hide some of your admin views behind a login wall.
+
 - `Peewee model example <https://github.com/MrJoes/Flask-Admin/tree/master/examples/peewee>`_
+    Not so keen on SQLAlchemy? Perhaps you'd rather use Peewee?
+
 - `MongoEngine model example <https://github.com/MrJoes/Flask-Admin/tree/master/examples/mongoengine>`_
+   ... or check this example if MongoDB is more your style.
+
+- `I18n and L10n with Flask-BabelEx <https://github.com/MrJoes/Flask-Admin/tree/master/examples/babel>`_
+   Do you need to make your Admin interface available in other languages? Luckily, Flask-Admin is built for just that kind of thing.
+
+- `Redis terminal <https://github.com/MrJoes/Flask-Admin/tree/master/examples/rediscli>`_
+   If you use Redis for caching, then check this example to see how easy it is to add a Redis terminal to your Admin
+   interface, so you can reach your Redis instance straight from a browser.
+

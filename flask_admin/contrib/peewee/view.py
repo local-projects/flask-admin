@@ -5,6 +5,8 @@ from flask import flash
 from flask.ext.admin._compat import string_types
 from flask.ext.admin.babel import gettext, ngettext, lazy_gettext
 from flask.ext.admin.model import BaseModelView
+from flask.ext.admin.model.form import wrap_fields_in_fieldlist
+from flask.ext.admin.model.fields import ListEditableFieldList
 
 from peewee import PrimaryKeyField, ForeignKeyField, Field, CharField, TextField
 
@@ -132,10 +134,14 @@ class ModelView(BaseModelView):
     """
 
     def __init__(self, model, name=None,
-                 category=None, endpoint=None, url=None):
+                 category=None, endpoint=None, url=None, static_folder=None,
+                 menu_class_name=None, menu_icon_type=None, menu_icon_value=None):
         self._search_fields = []
 
-        super(ModelView, self).__init__(model, name, category, endpoint, url)
+        super(ModelView, self).__init__(model, name, category, endpoint, url, static_folder,
+                                        menu_class_name=menu_class_name,
+                                        menu_icon_type=menu_icon_type,
+                                        menu_icon_value=menu_icon_value)
 
         self._primary_key = self.scaffold_pk()
 
@@ -233,6 +239,27 @@ class ModelView(BaseModelView):
 
         return form_class
 
+    def scaffold_list_form(self, custom_fieldlist=ListEditableFieldList,
+                           validators=None):
+        """
+            Create form for the `index_view` using only the columns from
+            `self.column_editable_list`.
+
+            :param validators:
+                `form_args` dict with only validators
+                {'name': {'validators': [required()]}}
+            :param custom_fieldlist:
+                A WTForm FieldList class. By default, `ListEditableFieldList`.
+        """
+        form_class = get_form(self.model, self.model_form_converter(self),
+                              base_class=self.form_base_class,
+                              only=self.column_editable_list,
+                              field_args=validators)
+
+        return wrap_fields_in_fieldlist(self.form_base_class,
+                                        form_class,
+                                        custom_fieldlist)
+
     def scaffold_inline_form_models(self, form_class):
         converter = self.model_form_converter(self)
         inline_converter = self.inline_model_form_converter(self)
@@ -305,11 +332,11 @@ class ModelView(BaseModelView):
 
         # Filters
         if self._filters:
-            for flt, value in filters:
+            for flt, flt_name, value in filters:
                 f = self._filters[flt]
 
                 query = self._handle_join(query, f.column, joins)
-                query = f.apply(query, value)
+                query = f.apply(query, f.clean(value))
 
         # Get count
         count = query.count()
@@ -350,10 +377,9 @@ class ModelView(BaseModelView):
             save_inline(form, model)
         except Exception as ex:
             if not self.handle_view_exception(ex):
-                raise
+                flash(gettext('Failed to create record. %(error)s', error=str(ex)), 'error')
+                log.exception('Failed to create record.')
 
-            flash(gettext('Failed to create model. %(error)s', error=str(ex)), 'error')
-            log.exception('Failed to create model')
             return False
         else:
             self.after_model_change(form, model, True)
@@ -370,10 +396,9 @@ class ModelView(BaseModelView):
             save_inline(form, model)
         except Exception as ex:
             if not self.handle_view_exception(ex):
-                raise
+                flash(gettext('Failed to update record. %(error)s', error=str(ex)), 'error')
+                log.exception('Failed to update record.')
 
-            flash(gettext('Failed to update model. %(error)s', error=str(ex)), 'error')
-            log.exception('Failed to update model')
             return False
         else:
             self.after_model_change(form, model, False)
@@ -387,10 +412,9 @@ class ModelView(BaseModelView):
             return True
         except Exception as ex:
             if not self.handle_view_exception(ex):
-                raise
+                flash(gettext('Failed to delete record. %(error)s', error=str(ex)), 'error')
+                log.exception('Failed to delete record.')
 
-            flash(gettext('Failed to delete model. %(error)s', error=str(ex)), 'error')
-            log.exception('Failed to delete model')
             return False
 
     # Default model actions
@@ -403,7 +427,7 @@ class ModelView(BaseModelView):
 
     @action('delete',
             lazy_gettext('Delete'),
-            lazy_gettext('Are you sure you want to delete selected models?'))
+            lazy_gettext('Are you sure you want to delete selected records?'))
     def action_delete(self, ids):
         try:
             model_pk = getattr(self.model, self._primary_key)
@@ -419,12 +443,10 @@ class ModelView(BaseModelView):
                     m.delete_instance(recursive=True)
                     count += 1
 
-            flash(ngettext('Model was successfully deleted.',
-                           '%(count)s models were successfully deleted.',
+            flash(ngettext('Record was successfully deleted.',
+                           '%(count)s records were successfully deleted.',
                            count,
                            count=count))
         except Exception as ex:
             if not self.handle_view_exception(ex):
-                raise
-
-            flash(gettext('Failed to delete models. %(error)s', error=str(ex)), 'error')
+                flash(gettext('Failed to delete records. %(error)s', error=str(ex)), 'error')

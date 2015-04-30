@@ -1,9 +1,11 @@
 import warnings
 import re
 
-from flask import request, url_for, redirect, flash, abort, json, Response
-
+from flask import (request, redirect, flash, abort, json, Response,
+                   get_flashed_messages)
 from jinja2 import contextfunction
+from wtforms.fields import HiddenField
+from wtforms.validators import ValidationError, Required
 
 from flask.ext.admin.babel import gettext
 
@@ -11,17 +13,51 @@ from flask.ext.admin.base import BaseView, expose
 from flask.ext.admin.form import BaseForm, FormOpts, rules
 from flask.ext.admin.model import filters, typefmt
 from flask.ext.admin.actions import ActionsMixin
-from flask.ext.admin.helpers import get_form_data, validate_form_on_submit, get_redirect_target
+from flask.ext.admin.helpers import (get_form_data, validate_form_on_submit,
+                                     get_redirect_target, flash_errors)
 from flask.ext.admin.tools import rec_getattr
 from flask.ext.admin._backwards import ObsoleteAttr
-from flask.ext.admin._compat import iteritems, OrderedDict
+from flask.ext.admin._compat import iteritems, OrderedDict, as_unicode
 from .helpers import prettify_name, get_mdict_item_or_list
 from .ajax import AjaxModelLoader
+from .fields import ListEditableFieldList
 
 
 # Used to generate filter query string name
 filter_char_re = re.compile('[^a-z0-9 ]')
 filter_compact_re = re.compile(' +')
+
+
+class ViewArgs(object):
+    """
+        List view arguments.
+    """
+    def __init__(self, page=None, sort=None, sort_desc=None, search=None, filters=None, extra_args=None):
+        self.page = page
+        self.sort = sort
+        self.sort_desc = bool(sort_desc)
+        self.search = search
+        self.filters = filters
+
+        if not self.search:
+            self.search = None
+
+        self.extra_args = extra_args or dict()
+
+    def clone(self, **kwargs):
+        if self.filters:
+            flt = list(self.filters)
+        else:
+            flt = None
+
+        kwargs.setdefault('page', self.page)
+        kwargs.setdefault('sort', self.sort)
+        kwargs.setdefault('sort_desc', self.sort_desc)
+        kwargs.setdefault('search', self.search)
+        kwargs.setdefault('filters', flt)
+        kwargs.setdefault('extra_args', dict(self.extra_args))
+
+        return ViewArgs(**kwargs)
 
 
 class BaseModelView(BaseView, ActionsMixin):
@@ -232,6 +268,16 @@ class BaseModelView(BaseView, ActionsMixin):
                 column_searchable_list = ('name', 'email')
     """
 
+    column_editable_list = None
+    """
+        Collection of the columns which can be edited from the list view.
+
+        For example::
+
+            class MyModelView(BaseModelView):
+                column_editable_list = ('name', 'last_name')
+    """
+
     column_choices = None
     """
         Map choices to columns in list view
@@ -282,7 +328,7 @@ class BaseModelView(BaseView, ActionsMixin):
         For example::
 
             class MyForm(Form):
-                name = TextField('Name')
+                name = StringField('Name')
 
             class MyModelView(BaseModelView):
                 form = MyForm
@@ -312,6 +358,7 @@ class BaseModelView(BaseView, ActionsMixin):
 
         Example::
 
+            from wtforms.validators import required
             class MyModelView(BaseModelView):
                 form_args = dict(
                     name=dict(label='First Name', validators=[required()])
@@ -365,6 +412,17 @@ class BaseModelView(BaseView, ActionsMixin):
                         'style': 'color: black'
                     }
                 }
+
+        Changing the format of a DateTimeField will require changes to both form_widget_args and form_args.
+
+        Example::
+
+            form_args = dict(
+                start=dict(format='%Y-%m-%d %I:%M %p') # changes how the input is parsed by strptime (12 hour time)
+            )
+            form_widget_args = dict(
+                start={'data-date-format': u'yyyy-mm-dd HH:ii P', 'data-show-meridian': 'True'} # changes how the DateTimeField displays the time
+            )
     """
 
     form_extra_fields = None
@@ -475,7 +533,8 @@ class BaseModelView(BaseView, ActionsMixin):
     """
 
     def __init__(self, model,
-                 name=None, category=None, endpoint=None, url=None):
+                 name=None, category=None, endpoint=None, url=None, static_folder=None,
+                 menu_class_name=None, menu_icon_type=None, menu_icon_value=None):
         """
             Constructor.
 
@@ -491,9 +550,16 @@ class BaseModelView(BaseView, ActionsMixin):
                 'userview'
             :param url:
                 Base URL. If not provided, will use endpoint as a URL.
-            :param debug:
-                Enable debugging mode. Won't catch exceptions on model
-                save failures.
+            :param menu_class_name:
+                Optional class name for the menu item.
+            :param menu_icon_type:
+                Optional icon. Possible icon types:
+
+                 - `flask.ext.admin.consts.ICON_TYPE_GLYPH` - Bootstrap glyph icon
+                 - `flask.ext.admin.consts.ICON_TYPE_IMAGE` - Image relative to Flask static directory
+                 - `flask.ext.admin.consts.ICON_TYPE_IMAGE_URL` - Image with full URL
+            :param menu_icon_value:
+                Icon glyph name or URL, depending on `menu_icon_type` setting
         """
 
         # If name not provided, it is model name
@@ -504,7 +570,10 @@ class BaseModelView(BaseView, ActionsMixin):
         if endpoint is None:
             endpoint = model.__name__.lower()
 
-        super(BaseModelView, self).__init__(name, category, endpoint, url)
+        super(BaseModelView, self).__init__(name, category, endpoint, url, static_folder,
+                                            menu_class_name=menu_class_name,
+                                            menu_icon_type=menu_icon_type,
+                                            menu_icon_value=menu_icon_value)
 
         self.model = model
 
@@ -524,6 +593,13 @@ class BaseModelView(BaseView, ActionsMixin):
 
         self._create_form_class = self.get_create_form()
         self._edit_form_class = self.get_edit_form()
+        self._delete_form_class = self.get_delete_form()
+
+        # List View In-Line Editing
+        if self.column_editable_list:
+            self._list_form_class = self.get_list_form()
+        else:
+            self.column_editable_list = {}
 
     def _refresh_filters_cache(self):
         self._filters = self.get_filters()
@@ -539,7 +615,7 @@ class BaseModelView(BaseView, ActionsMixin):
                 self._filter_groups[flt.name].append({
                     'index': i,
                     'arg': self.get_filter_arg(i, flt),
-                    'operation': flt.operation(),
+                    'operation': as_unicode(flt.operation()),
                     'options': flt.get_options(self) or None,
                     'type': flt.data_type
                 })
@@ -614,7 +690,7 @@ class BaseModelView(BaseView, ActionsMixin):
         """
             Return PK value from a model object.
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
     # List view
     def scaffold_list_columns(self):
@@ -627,7 +703,7 @@ class BaseModelView(BaseView, ActionsMixin):
 
                 ['name', 'first_name', 'last_name']
         """
-        raise NotImplemented('Please implement scaffold_list_columns method')
+        raise NotImplementedError('Please implement scaffold_list_columns method')
 
     def get_column_name(self, field):
         """
@@ -666,7 +742,7 @@ class BaseModelView(BaseView, ActionsMixin):
             Expected return format is a dictionary, where keys are field names and
             values are property names.
         """
-        raise NotImplemented('Please implement scaffold_sortable_columns method')
+        raise NotImplementedError('Please implement scaffold_sortable_columns method')
 
     def get_sortable_columns(self):
         """
@@ -718,6 +794,15 @@ class BaseModelView(BaseView, ActionsMixin):
         """
         return isinstance(filter, filters.BaseFilter)
 
+    def handle_filter(self, filter):
+        """
+            Postprocess (add joins, etc) for a filter.
+
+            :param filter:
+                Filter object to postprocess
+        """
+        return filter
+
     def get_filters(self):
         """
             Return a list of filter objects.
@@ -730,7 +815,7 @@ class BaseModelView(BaseView, ActionsMixin):
 
             for n in self.column_filters:
                 if self.is_valid_filter(n):
-                    collection.append(n)
+                    collection.append(self.handle_filter(n))
                 else:
                     flt = self.scaffold_filters(n)
                     if flt:
@@ -754,7 +839,7 @@ class BaseModelView(BaseView, ActionsMixin):
                 Filter instance
         """
         if self.named_filter_urls:
-            name = ('%s %s' % (flt.name, flt.operation())).lower()
+            name = ('%s %s' % (flt.name, as_unicode(flt.operation()))).lower()
             name = filter_char_re.sub('', name)
             name = filter_compact_re.sub('_', name)
             return name
@@ -767,7 +852,23 @@ class BaseModelView(BaseView, ActionsMixin):
             Create `form.BaseForm` inherited class from the model. Must be
             implemented in the child class.
         """
-        raise NotImplemented('Please implement scaffold_form method')
+        raise NotImplementedError('Please implement scaffold_form method')
+
+    def scaffold_list_form(self, custom_fieldlist=ListEditableFieldList,
+                           validators=None):
+        """
+            Create form for the `index_view` using only the columns from
+            `self.column_editable_list`.
+
+            :param validators:
+                `form_args` dict with only validators
+                {'name': {'validators': [required()]}}
+            :param custom_fieldlist:
+                A WTForm FieldList class. By default, `ListEditableFieldList`.
+
+            Must be implemented in the child class.
+        """
+        raise NotImplementedError('Please implement scaffold_list_form method')
 
     def get_form(self):
         """
@@ -782,6 +883,45 @@ class BaseModelView(BaseView, ActionsMixin):
             return self.form
 
         return self.scaffold_form()
+
+    def get_list_form(self):
+        """
+            Get form class for the editable list view.
+
+            Uses only validators from `form_args` to build the form class.
+
+            Allows overriding the editable list view field/widget. For example::
+
+                from flask.ext.admin.model.fields import ListEditableFieldList
+                from flask.ext.admin.model.widgets import XEditableWidget
+
+                class CustomWidget(XEditableWidget):
+                    def get_kwargs(self, subfield, kwargs):
+                        if subfield.type == 'TextAreaField':
+                            kwargs['data-type'] = 'textarea'
+                            kwargs['data-rows'] = '20'
+                        # elif: kwargs for other fields
+
+                        return kwargs
+
+                class CustomFieldList(ListEditableFieldList):
+                    widget = CustomWidget()
+
+                class MyModelView(BaseModelView):
+                    def get_list_form(self):
+                        return self.scaffold_list_form(CustomFieldList)
+        """
+        if self.form_args:
+            # get only validators, other form_args can break FieldList wrapper
+            validators = dict(
+                (key, {'validators': value["validators"]})
+                for key, value in iteritems(self.form_args)
+                if value.get("validators")
+            )
+        else:
+            validators = None
+
+        return self.scaffold_list_form(validators=validators)
 
     def get_create_form(self):
         """
@@ -799,6 +939,18 @@ class BaseModelView(BaseView, ActionsMixin):
         """
         return self.get_form()
 
+    def get_delete_form(self):
+        """
+            Create form class for model delete view.
+
+            Override to implement customized behavior.
+        """
+        class DeleteForm(self.form_base_class):
+            id = HiddenField(validators=[Required()])
+            url = HiddenField()
+
+        return DeleteForm
+
     def create_form(self, obj=None):
         """
             Instantiate model creation form and return it.
@@ -815,15 +967,60 @@ class BaseModelView(BaseView, ActionsMixin):
         """
         return self._edit_form_class(get_form_data(), obj=obj)
 
+    def delete_form(self):
+        """
+            Instantiate model delete form and return it.
+
+            Override to implement custom behavior.
+            
+            The delete form originally used a GET request, so delete_form
+            accepts both GET and POST request for backwards compatibility.
+        """
+        if request.form:
+            return self._delete_form_class(request.form)
+        elif request.args:
+            # allow request.args for backward compatibility
+            return self._delete_form_class(request.args)
+        else:
+            return self._delete_form_class()
+
+    def list_form(self, obj=None):
+        """
+            Instantiate model editing form for list view and return it.
+
+            Override to implement custom behavior.
+        """
+        return self._list_form_class(get_form_data(), obj=obj)
+
+    def validate_form(self, form):
+        """
+            Validate the form on submit.
+
+            :param form:
+                Form to validate
+        """
+        return validate_form_on_submit(form)
+
     # Helpers
     def is_sortable(self, name):
         """
             Verify if column is sortable.
 
+            Not case-sensitive.
+
             :param name:
                 Column name.
         """
-        return name in self._sortable_columns
+        return name.lower() in (x.lower() for x in self._sortable_columns)
+
+    def is_editable(self, name):
+        """
+            Verify if column is editable.
+
+            :param name:
+                Column name.
+        """
+        return name in self.column_editable_list
 
     def _get_column_by_idx(self, idx):
         """
@@ -865,7 +1062,7 @@ class BaseModelView(BaseView, ActionsMixin):
                 List of filter tuples. First value in a tuple is a search
                 index, second value is a search value.
         """
-        raise NotImplemented('Please implement get_list method')
+        raise NotImplementedError('Please implement get_list method')
 
     def get_one(self, id):
         """
@@ -876,14 +1073,18 @@ class BaseModelView(BaseView, ActionsMixin):
             :param id:
                 Model id
         """
-        raise NotImplemented('Please implement get_one method')
+        raise NotImplementedError('Please implement get_one method')
 
     # Exception handler
     def handle_view_exception(self, exc):
-        if self._debug:
-            return False
+        if isinstance(exc, ValidationError):
+            flash(as_unicode(exc))
+            return True
 
-        return True
+        if self._debug:
+            raise
+
+        return False
 
     # Model event handlers
     def on_model_change(self, form, model, is_created):
@@ -946,6 +1147,29 @@ class BaseModelView(BaseView, ActionsMixin):
         """
         pass
 
+    def on_form_prefill (self, form, id):
+        """
+            Perform additional actions to pre-fill the edit form.
+
+            Called from edit_view, if the current action is rendering
+            the form rather than receiving client side input, after
+            default pre-filling has been performed.
+
+            By default does nothing.
+
+            You only need to override this if you have added custom
+            fields that depend on the database contents in a way that
+            Flask-admin can't figure out by itself. Fields that were
+            added by name of a normal column or relationship should
+            work out of the box.
+
+            :param form:
+                Form instance
+            :param id:
+                id of the object that is going to be edited
+        """
+        pass
+
     def create_model(self, form):
         """
             Create model from the form.
@@ -957,7 +1181,7 @@ class BaseModelView(BaseView, ActionsMixin):
             :param form:
                 Form instance
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def update_model(self, form, model):
         """
@@ -972,7 +1196,7 @@ class BaseModelView(BaseView, ActionsMixin):
             :param model:
                 Model instance
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def delete_model(self, model):
         """
@@ -985,7 +1209,7 @@ class BaseModelView(BaseView, ActionsMixin):
             :param model:
                 Model instance
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
     # Various helpers
     def _prettify_name(self, name):
@@ -1022,7 +1246,9 @@ class BaseModelView(BaseView, ActionsMixin):
                     value = request.args[n]
 
                     if flt.validate(value):
-                        filters.append((pos, (idx, flt.clean(value))))
+                        filters.append((pos, (idx, flt.name, value)))
+                    else:
+                        flash(gettext('Invalid Filter Value: %(value)s', value=value))
 
             # Sort filters
             return [v[1] for v in sorted(filters, key=lambda n: n[0])]
@@ -1033,50 +1259,39 @@ class BaseModelView(BaseView, ActionsMixin):
         """
             Return arguments from query string.
         """
-        page = request.args.get('page', 0, type=int)
-        sort = request.args.get('sort', None, type=int)
-        sort_desc = request.args.get('desc', None, type=int)
-        search = request.args.get('search', None)
-        filters = self._get_list_filter_args()
+        return ViewArgs(page=request.args.get('page', 0, type=int),
+                        sort=request.args.get('sort', None, type=int),
+                        sort_desc=request.args.get('desc', None, type=int),
+                        search=request.args.get('search', None),
+                        filters=self._get_list_filter_args())
 
-        return page, sort, sort_desc, search, filters
-
-    def _get_url(self, view=None, page=None, sort=None, sort_desc=None,
-                 search=None, filters=None):
+    # URL generation helpers
+    def _get_list_url(self, view_args):
         """
             Generate page URL with current page, sort column and
             other parameters.
 
             :param view:
                 View name
-            :param page:
-                Page number
-            :param sort:
-                Sort column index
-            :param sort_desc:
-                Use descending sorting order
-            :param search:
-                Search query
-            :param filters:
-                List of active filters
+            :param view_args:
+                ViewArgs object with page number, filters, etc.
         """
-        if not search:
-            search = None
+        page = view_args.page or None
+        desc = 1 if view_args.sort_desc else None
 
-        if not page:
-            page = None
+        kwargs = dict(page=page, sort=view_args.sort, desc=desc, search=view_args.search)
+        kwargs.update(view_args.extra_args)
 
-        kwargs = dict(page=page, sort=sort, desc=sort_desc, search=search)
-
-        if filters:
-            for i, pair in enumerate(filters):
-                idx, value = pair
+        if view_args.filters:
+            for i, pair in enumerate(view_args.filters):
+                idx, flt_name, value = pair
 
                 key = 'flt%d_%s' % (i, self.get_filter_arg(idx, self._filters[idx]))
                 kwargs[key] = value
 
-        return url_for(view, **kwargs)
+        return self.get_url('.index_view', **kwargs)
 
+    # Actions
     def is_action_allowed(self, name):
         """
             Override this method to allow or disallow actions based
@@ -1115,7 +1330,11 @@ class BaseModelView(BaseView, ActionsMixin):
         if choices_map:
             return choices_map.get(value) or value
 
-        type_fmt = self.column_type_formatters.get(type(value))
+        type_fmt = None
+        for typeobj, formatter in self.column_type_formatters.items():
+            if isinstance(value, typeobj):
+                type_fmt = formatter
+                break
         if type_fmt is not None:
             value = type_fmt(self, value)
 
@@ -1144,7 +1363,7 @@ class BaseModelView(BaseView, ActionsMixin):
         """
             Model backend will override this to implement AJAX model loading.
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
     # Views
     @expose('/')
@@ -1152,17 +1371,27 @@ class BaseModelView(BaseView, ActionsMixin):
         """
             List view
         """
+        if self.column_editable_list:
+            form = self.list_form()
+        else:
+            form = None
+
+        if self.can_delete:
+            delete_form = self.delete_form()
+        else:
+            delete_form = None
+
         # Grab parameters from URL
-        page, sort_idx, sort_desc, search, filters = self._get_list_extra_args()
+        view_args = self._get_list_extra_args()
 
         # Map column index to column name
-        sort_column = self._get_column_by_idx(sort_idx)
+        sort_column = self._get_column_by_idx(view_args.sort)
         if sort_column is not None:
             sort_column = sort_column[0]
 
         # Get count and data
-        count, data = self.get_list(page, sort_column, sort_desc,
-                                    search, filters)
+        count, data = self.get_list(view_args.page, sort_column, view_args.sort_desc,
+                                    view_args.search, view_args.filters)
 
         # Calculate number of pages
         num_pages = count // self.page_size
@@ -1175,78 +1404,85 @@ class BaseModelView(BaseView, ActionsMixin):
             if p == 0:
                 p = None
 
-            return self._get_url('.index_view', p, sort_idx, sort_desc,
-                                 search, filters)
+            return self._get_list_url(view_args.clone(page=p))
 
         def sort_url(column, invert=False):
             desc = None
 
-            if invert and not sort_desc:
+            if invert and not view_args.sort_desc:
                 desc = 1
 
-            return self._get_url('.index_view', page, column, desc,
-                                 search, filters)
+            return self._get_list_url(view_args.clone(sort=column, sort_desc=desc))
 
         # Actions
         actions, actions_confirmation = self.get_actions_list()
 
-        return self.render(self.list_template,
-                               data=data,
-                               # List
-                               list_columns=self._list_columns,
-                               sortable_columns=self._sortable_columns,
-                               # Stuff
-                               enumerate=enumerate,
-                               get_pk_value=self.get_pk_value,
-                               get_value=self.get_list_value,
-                               return_url=self._get_url('.index_view',
-                                                        page,
-                                                        sort_idx,
-                                                        sort_desc,
-                                                        search,
-                                                        filters),
-                               # Pagination
-                               count=count,
-                               pager_url=pager_url,
-                               num_pages=num_pages,
-                               page=page,
-                               # Sorting
-                               sort_column=sort_idx,
-                               sort_desc=sort_desc,
-                               sort_url=sort_url,
-                               # Search
-                               search_supported=self._search_supported,
-                               clear_search_url=self._get_url('.index_view',
-                                                              None,
-                                                              sort_idx,
-                                                              sort_desc),
-                               search=search,
-                               # Filters
-                               filters=self._filters,
-                               filter_groups=self._filter_groups,
-                               active_filters=filters,
+        clear_search_url = self._get_list_url(view_args.clone(page=0,
+                                                              sort=view_args.sort,
+                                                              sort_desc=view_args.sort_desc,
+                                                              search=None,
+                                                              filters=None))
 
-                               # Actions
-                               actions=actions,
-                               actions_confirmation=actions_confirmation)
+        return self.render(
+            self.list_template,
+            data=data,
+            form=form,
+            delete_form=delete_form,
+
+            # List
+            list_columns=self._list_columns,
+            sortable_columns=self._sortable_columns,
+            editable_columns=self.column_editable_list,
+
+            # Pagination
+            count=count,
+            pager_url=pager_url,
+            num_pages=num_pages,
+            page=view_args.page,
+
+            # Sorting
+            sort_column=view_args.sort,
+            sort_desc=view_args.sort_desc,
+            sort_url=sort_url,
+
+            # Search
+            search_supported=self._search_supported,
+            clear_search_url=clear_search_url,
+            search=view_args.search,
+
+            # Filters
+            filters=self._filters,
+            filter_groups=self._filter_groups,
+            active_filters=view_args.filters,
+
+            # Actions
+            actions=actions,
+            actions_confirmation=actions_confirmation,
+
+            # Misc
+            enumerate=enumerate,
+            get_pk_value=self.get_pk_value,
+            get_value=self.get_list_value,
+            return_url=self._get_list_url(view_args),
+        )
 
     @expose('/new/', methods=('GET', 'POST'))
     def create_view(self):
         """
             Create model view
         """
-        return_url = get_redirect_target() or url_for('.index_view')
+        return_url = get_redirect_target() or self.get_url('.index_view')
 
         if not self.can_create:
             return redirect(return_url)
 
         form = self.create_form()
 
-        if validate_form_on_submit(form):
+        if self.validate_form(form):
             if self.create_model(form):
                 if '_add_another' in request.form:
-                    flash(gettext('Model was successfully created.'))
-                    return redirect(url_for('.create_view', url=return_url))
+                    flash(gettext('Record was successfully created.'))
+                    return redirect(request.url)
                 else:
                     return redirect(return_url)
 
@@ -1263,7 +1499,7 @@ class BaseModelView(BaseView, ActionsMixin):
         """
             Edit model view
         """
-        return_url = get_redirect_target() or url_for('.index_view')
+        return_url = get_redirect_target() or self.get_url('.index_view')
 
         if not self.can_edit:
             return redirect(return_url)
@@ -1279,13 +1515,16 @@ class BaseModelView(BaseView, ActionsMixin):
 
         form = self.edit_form(obj=model)
 
-        if validate_form_on_submit(form):
+        if self.validate_form(form):
             if self.update_model(form, model):
                 if '_continue_editing' in request.form:
-                    flash(gettext('Model was successfully saved.'))
+                    flash(gettext('Record was successfully saved.'))
                     return redirect(request.url)
                 else:
                     return redirect(return_url)
+
+        if request.method == 'GET':
+            self.on_form_prefill(form, id)
 
         form_opts = FormOpts(widget_args=self.form_widget_args,
                              form_rules=self._form_edit_rules)
@@ -1301,20 +1540,28 @@ class BaseModelView(BaseView, ActionsMixin):
         """
             Delete model view. Only POST method is allowed.
         """
-        return_url = get_redirect_target() or url_for('.index_view')
+        return_url = get_redirect_target() or self.get_url('.index_view')
 
-        # TODO: Use post
         if not self.can_delete:
             return redirect(return_url)
 
-        id = get_mdict_item_or_list(request.args, 'id')
-        if id is None:
-            return redirect(return_url)
+        form = self.delete_form()
 
-        model = self.get_one(id)
+        if self.validate_form(form):
+             # id is Required()
+            id = form.id.data
 
-        if model:
-            self.delete_model(model)
+            model = self.get_one(id)
+
+            if model is None:
+                return redirect(return_url)
+
+            # message is flashed from within delete_model if it fails
+            if self.delete_model(model):
+                flash(gettext('Record was successfully deleted.'))
+                return redirect(return_url)
+        else:
+            flash_errors(form, message='Failed to delete record. %(error)s')
 
         return redirect(return_url)
 
@@ -1339,3 +1586,46 @@ class BaseModelView(BaseView, ActionsMixin):
 
         data = [loader.format(m) for m in loader.get_list(query, offset, limit)]
         return Response(json.dumps(data), mimetype='application/json')
+
+    @expose('/ajax/update/', methods=('POST',))
+    def ajax_update(self):
+        """
+            Edits a single column of a record in list view.
+        """
+        if not self.column_editable_list:
+            abort(404)
+
+        record = None
+        form = self.list_form()
+
+        # prevent validation issues due to submitting a single field
+        # delete all fields except the field being submitted
+        for field in form:
+            # only the submitted field has a positive last_index
+            if getattr(field, 'last_index', 0):
+                record = self.get_one(str(field.last_index))
+            elif field.name == 'csrf_token':
+                pass
+            else:
+                form.__delitem__(field.name)
+
+        if record is None:
+            return gettext('Failed to update record. %(error)s', error=''), 500
+
+        if self.validate_form(form):
+            if self.update_model(form, record):
+                # Success
+                return gettext('Record was successfully saved.')
+            else:
+                # Error: No records changed, or problem saving to database.
+                msgs = ", ".join([msg for msg in get_flashed_messages()])
+                return gettext('Failed to update record. %(error)s',
+                               error=msgs), 500
+        else:
+            for field in form:
+                for error in field.errors:
+                    # return validation error to x-editable
+                    if isinstance(error, list):
+                        return ", ".join(error), 500
+                    else:
+                        return error, 500

@@ -7,8 +7,33 @@ from flask.ext.admin._compat import text_type, as_unicode
 
 from . import widgets as admin_widgets
 
-__all__ = ['TimeField', 'Select2Field', 'Select2TagsField']
+"""
+An understanding of WTForms's Custom Widgets is helpful for understanding this code: http://wtforms.simplecodes.com/docs/0.6.2/widgets.html#custom-widgets
+"""
 
+__all__ = ['DateTimeField', 'TimeField', 'Select2Field', 'Select2TagsField']
+
+class DateTimeField(fields.DateTimeField):
+    """
+       Allows modifying the datetime format of a DateTimeField using form_args.
+    """
+    widget = admin_widgets.DateTimePickerWidget()
+    def __init__(self, label=None, validators=None, format=None, **kwargs):
+        """
+            Constructor
+
+            :param label:
+                Label
+            :param validators:
+                Field validators
+            :param format:
+                Format for text to date conversion. Defaults to '%Y-%m-%d %H:%M:%S'
+            :param kwargs:
+                Any additional parameters
+        """
+        super(DateTimeField, self).__init__(label, validators, **kwargs)
+
+        self.format = format or '%Y-%m-%d %H:%M:%S'
 
 class TimeField(fields.Field):
     """
@@ -30,8 +55,6 @@ class TimeField(fields.Field):
                 Supported time formats, as a enumerable.
             :param default_format:
                 Default time format. Defaults to '%H:%M:%S'
-            :param widget_format:
-                Widget date format. Defaults to 'hh:ii:ss'
             :param kwargs:
                 Any additional parameters
         """
@@ -42,36 +65,40 @@ class TimeField(fields.Field):
                                    '%I:%M:%S %p', '%I:%M %p')
 
         self.default_format = default_format or '%H:%M:%S'
-        self.widget_format = widget_format or 'hh:ii:ss'
 
     def _value(self):
         if self.raw_data:
             return u' '.join(self.raw_data)
+        elif self.data is not None:
+            return self.data.strftime(self.default_format)
         else:
-            return self.data and self.data.strftime(self.default_format) or u''
+            return u''
 
     def process_formdata(self, valuelist):
         if valuelist:
             date_str = u' '.join(valuelist)
 
-            for format in self.formats:
-                try:
-                    timetuple = time.strptime(date_str, format)
-                    self.data = datetime.time(timetuple.tm_hour,
-                                              timetuple.tm_min,
-                                              timetuple.tm_sec)
-                    return
-                except ValueError:
-                    pass
+            if date_str.strip():
+                for format in self.formats:
+                    try:
+                        timetuple = time.strptime(date_str, format)
+                        self.data = datetime.time(timetuple.tm_hour,
+                                                  timetuple.tm_min,
+                                                  timetuple.tm_sec)
+                        return
+                    except ValueError:
+                        pass
 
-            raise ValueError(gettext('Invalid time format'))
+                raise ValueError(gettext('Invalid time format'))
+            else:
+                self.data = None
 
 
 class Select2Field(fields.SelectField):
     """
         `Select2 <https://github.com/ivaynberg/select2>`_ styled select widget.
 
-        You must include select2.js, form.js and select2 stylesheet for it to
+        You must include select2.js, form-x.x.x.js and select2 stylesheet for it to
         work.
     """
     widget = admin_widgets.Select2Widget()
@@ -117,9 +144,9 @@ class Select2Field(fields.SelectField):
         super(Select2Field, self).pre_validate(form)
 
 
-class Select2TagsField(fields.TextField):
+class Select2TagsField(fields.StringField):
     """`Select2 <http://ivaynberg.github.com/select2/#tags>`_ styled text field.
-    You must include select2.js, form.js and select2 stylesheet for it to work.
+    You must include select2.js, form-x.x.x.js and select2 stylesheet for it to work.
     """
     widget = admin_widgets.Select2TagsWidget()
 

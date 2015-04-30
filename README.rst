@@ -1,8 +1,11 @@
 Flask-Admin
 ===========
 
-.. image:: https://travis-ci.org/mrjoes/flask-admin.png?branch=master
-	:target: https://travis-ci.org/mrjoes/flask-admin
+.. image:: https://d322cqt584bo4o.cloudfront.net/flask-admin/localized.png
+	:target: https://crowdin.com/project/flask-admin
+
+.. image:: https://travis-ci.org/flask-admin/flask-admin.png?branch=master
+	:target: https://travis-ci.org/flask-admin/flask-admin
 
 Introduction
 ------------
@@ -36,15 +39,10 @@ Several usage examples are included in the */examples* folder. Please feel free 
 on some of the existing ones, and then submit them via GitHub as a *pull-request*.
 
 You can see some of these examples in action at `http://examples.flask-admin.org <http://examples.flask-admin.org/>`_.
-To run that same page in your local environment, simply::
+To run the examples on your local environment, one at a time, do something like::
 
     cd flask-admin
-    python examples/runserver.py
-
-Alternatively, you can run the examples one at a time, with something like::
-
-    cd flask-admin
-    python examples/simple/simple.py
+    python examples/simple/app.py
 
 Documentation
 -------------
@@ -80,6 +78,7 @@ Test are run with *nose*. If you are not familiar with this package you can get 
 To run the tests, simply::
 
     pip install nose
+    pip install -r dev-requirements.txt
 
 and then::
 
@@ -100,3 +99,5 @@ Please note that you will need to install some additional dependencies in order 
 Flask-Admin is built with the help of `Bootstrap <http://getbootstrap.com/>`_ and `Select2 <https://github.com/ivaynberg/select2>`_.
 
 If you want to localize your application, install the `Flask-BabelEx <https://pypi.python.org/pypi/Flask-BabelEx>`_ package.
+
+You can help improve Flask-Admin's translations through Crowdin: https://crowdin.com/project/flask-admin 

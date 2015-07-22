@@ -4,7 +4,7 @@ from functools import wraps
 
 from flask import Blueprint, current_app, render_template, abort, g, url_for
 from flask_admin import babel
-from flask_admin._compat import with_metaclass
+from flask_admin._compat import with_metaclass, as_unicode
 from flask_admin import helpers as h
 
 # For compatibility reasons import MenuLink
@@ -188,7 +188,7 @@ class BaseView(with_metaclass(AdminViewMeta, BaseViewClass)):
         """
         self.name = name
         self.category = category
-        self.endpoint = endpoint
+        self.endpoint = self._get_endpoint(endpoint)
         self.url = url
         self.static_folder = static_folder
         self.static_url_path = static_url_path
@@ -206,16 +206,22 @@ class BaseView(with_metaclass(AdminViewMeta, BaseViewClass)):
         if self._default_view is None:
             raise Exception(u'Attempted to instantiate admin view %s without default view' % self.__class__.__name__)
 
+    def _get_endpoint(self, endpoint):
+        """
+            Generate Flask endpoint name. By default converts class name to lower case if endpoint is
+            not explicitly provided.
+        """
+        if endpoint:
+            return endpoint
+
+        return self.__class__.__name__.lower()
+
     def create_blueprint(self, admin):
         """
             Create Flask blueprint.
         """
         # Store admin instance
         self.admin = admin
-
-        # If endpoint name is not provided, get it from the class name
-        if self.endpoint is None:
-            self.endpoint = self.__class__.__name__.lower()
 
         # If the static_url_path is not provided, use the admin's
         if not self.static_url_path:
@@ -234,15 +240,13 @@ class BaseView(with_metaclass(AdminViewMeta, BaseViewClass)):
             if not self.url.startswith('/'):
                 self.url = '%s/%s' % (self.admin.url, self.url)
 
-
         # If we're working from the root of the site, set prefix to None
         if self.url == '/':
             self.url = None
             # prevent admin static files from conflicting with flask static files
             if not self.static_url_path:
-                self.static_folder='static'
-                self.static_url_path='/static/admin'
-
+                self.static_folder = 'static'
+                self.static_url_path = '/static/admin'
 
         # If name is not povided, use capitalized endpoint name
         if self.name is None:
@@ -450,7 +454,8 @@ class Admin(object):
                  endpoint=None,
                  static_url_path=None,
                  base_template=None,
-                 template_mode=None):
+                 template_mode=None,
+                 category_icon_classes=None):
         """
             Constructor.
 
@@ -478,6 +483,9 @@ class Admin(object):
             :param template_mode:
                 Base template path. Defaults to `bootstrap2`. If you want to use
                 Bootstrap 3 integration, change it to `bootstrap3`.
+            :param category_icon_classes:
+                A dict of category names as keys and html classes as values to be added to menu category icons.
+                Example: {'Favorites': 'glyphicon glyphicon-star'}
         """
         self.app = app
 
@@ -499,6 +507,7 @@ class Admin(object):
         self.subdomain = subdomain
         self.base_template = base_template or 'admin/base.html'
         self.template_mode = template_mode or 'bootstrap2'
+        self.category_icon_classes = category_icon_classes or dict()
 
         # Add predefined index view
         self.add_view(self.index_view)
@@ -536,18 +545,16 @@ class Admin(object):
             self._menu_links.append(link)
 
     def _add_menu_item(self, menu_item, target_category):
-        """
-            Add a view to the menu tree
-
-            :param view:
-                View to add
-        """
         if target_category:
-            category = self._menu_categories.get(target_category)
+            cat_text = as_unicode(target_category)
 
+            category = self._menu_categories.get(cat_text)
+
+            # create a new menu category if one does not exist already
             if category is None:
                 category = MenuCategory(target_category)
-                self._menu_categories[target_category] = category
+                category.class_name = self.category_icon_classes.get(cat_text)
+                self._menu_categories[cat_text] = category
 
                 self._menu.append(category)
 
@@ -556,6 +563,12 @@ class Admin(object):
             self._menu.append(menu_item)
 
     def _add_view_to_menu(self, view):
+        """
+            Add a view to the menu tree
+
+            :param view:
+                View to add
+        """
         self._add_menu_item(MenuView(view.name, view), view.category)
 
     def get_category_menu_item(self, name):

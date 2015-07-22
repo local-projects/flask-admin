@@ -51,11 +51,21 @@ class FileUploadInput(object):
 
         template = self.data_template if field.data else self.empty_template
 
+        if field.errors:
+            template = self.empty_template
+
+        if field.data and isinstance(field.data, FileStorage):
+            value = field.data.filename
+        else:
+            value = field.data or ''
+
         return HTMLString(template % {
             'text': html_params(type='text',
                                 readonly='readonly',
-                                value=field.data),
+                                value=value,
+                                name=field.name),
             'file': html_params(type='file',
+                                value=value,
                                 **kwargs),
             'marker': '_%s-delete' % field.name
         })
@@ -121,7 +131,7 @@ class FileUploadField(fields.StringField):
     def __init__(self, label=None, validators=None,
                  base_path=None, relative_path=None,
                  namegen=None, allowed_extensions=None,
-                 permission=0o666,
+                 permission=0o666, allow_overwrite=True,
                  **kwargs):
         """
             Constructor.
@@ -153,6 +163,11 @@ class FileUploadField(fields.StringField):
 
             :param allowed_extensions:
                 List of allowed extensions. If not provided, will allow any file.
+            :param allow_overwrite:
+                Whether to overwrite existing files in upload directory. Defaults to `True`.
+
+            .. versionadded:: 1.1.1
+                The `allow_overwrite` parameter was added.
         """
         self.base_path = base_path
         self.relative_path = relative_path
@@ -160,6 +175,7 @@ class FileUploadField(fields.StringField):
         self.namegen = namegen or namegen_filename
         self.allowed_extensions = allowed_extensions
         self.permission = permission
+        self._allow_overwrite = allow_overwrite
 
         self._should_delete = False
 
@@ -188,6 +204,13 @@ class FileUploadField(fields.StringField):
         if self._is_uploaded_file(self.data) and not self.is_file_allowed(self.data.filename):
             raise ValidationError(gettext('Invalid file extension'))
 
+        # Handle overwriting existing content
+        if not self._is_uploaded_file(self.data):
+            return
+
+        if not self._allow_overwrite and os.path.exists(self._get_path(self.data.filename)):
+            raise ValidationError(gettext('File "%s" already exists.' % self.data.filename))
+
     def process(self, formdata, data=unset_value):
         if formdata:
             marker = '_%s-delete' % self.name
@@ -200,10 +223,10 @@ class FileUploadField(fields.StringField):
         if self._should_delete:
             self.data = None
         elif valuelist:
-            data = valuelist[0]
-
-            if self._is_uploaded_file(data):
-                self.data = data
+            for data in valuelist:
+                if self._is_uploaded_file(data):
+                    self.data = data
+                    break
 
     def populate_obj(self, obj, name):
         field = getattr(obj, name, None)
@@ -251,6 +274,9 @@ class FileUploadField(fields.StringField):
         path = self._get_path(filename)
         if not op.exists(op.dirname(path)):
             os.makedirs(os.path.dirname(path), self.permission | 0o111)
+
+        if self._allow_overwrite == False and os.path.exists(path):
+            raise ValueError(gettext('File "%s" already exists.' % path))
 
         data.save(path)
 
@@ -314,7 +340,7 @@ class ImageUploadField(FileUploadField):
             :param max_size:
                 Tuple of (width, height, force) or None. If provided, Flask-Admin will
                 resize image to the desired size.
-                
+
                 Width and height is in pixels. If `force` is set to `True`, will try to fit image into dimensions and
                 keep aspect ratio, otherwise will just resize to target size.
             :param thumbgen:

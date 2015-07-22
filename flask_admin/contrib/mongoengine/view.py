@@ -484,7 +484,7 @@ class ModelView(BaseModelView):
             query = self._search(query, search)
 
         # Get count
-        count = query.count()
+        count = query.count() if not self.simple_list_pager else None
 
         # Sorting
         if sort_column:
@@ -544,7 +544,7 @@ class ModelView(BaseModelView):
         else:
             self.after_model_change(form, model, True)
 
-        return True
+        return model
 
     def update_model(self, form, model):
         """
@@ -582,7 +582,6 @@ class ModelView(BaseModelView):
         try:
             self.on_model_delete(model)
             model.delete()
-            return True
         except Exception as ex:
             if not self.handle_view_exception(ex):
                 flash(gettext('Failed to delete record. %(error)s',
@@ -591,6 +590,11 @@ class ModelView(BaseModelView):
                 log.exception('Failed to delete record.')
 
             return False
+        else:
+            self.after_model_delete(model)
+
+        return True
+
 
     # FileField access API
     @expose('/api/file/')

@@ -222,7 +222,7 @@ class ModelView(BaseModelView):
             query = self._search(query, search)
 
         # Get count
-        count = self.coll.find(query).count()
+        count = self.coll.find(query).count() if not self.simple_list_pager else None
 
         # Sorting
         sort_by = None
@@ -288,7 +288,7 @@ class ModelView(BaseModelView):
         else:
             self.after_model_change(form, model, True)
 
-        return True
+        return model
 
     def update_model(self, form, model):
         """
@@ -330,12 +330,15 @@ class ModelView(BaseModelView):
 
             self.on_model_delete(model)
             self.coll.remove({'_id': pk})
-            return True
         except Exception as ex:
             flash(gettext('Failed to delete record. %(error)s', error=str(ex)),
                   'error')
             log.exception('Failed to delete record.')
             return False
+        else:
+            self.after_model_delete(model)
+
+        return True
 
     # Default model actions
     def is_action_allowed(self, name):

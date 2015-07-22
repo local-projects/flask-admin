@@ -107,9 +107,12 @@ class BaseBooleanFilter(BaseFilter):
 class BaseIntFilter(BaseFilter):
     """
         Base Int filter. Adds validation and changes value to python int.
+
+        Avoid using int(float(value)) to also allow using decimals, because it
+        causes precision issues with large numbers.
     """
     def clean(self, value):
-        return int(float(value))
+        return int(value)
 
 
 class BaseFloatFilter(BaseFilter):
@@ -123,9 +126,12 @@ class BaseFloatFilter(BaseFilter):
 class BaseIntListFilter(BaseFilter):
     """
         Base Integer list filter. Adds validation for int "In List" filter.
+
+        Avoid using int(float(value)) to also allow using decimals, because it
+        causes precision issues with large numbers.
     """
     def clean(self, value):
-        return [int(float(v.strip())) for v in value.split(',') if v.strip()]
+        return [int(v.strip()) for v in value.split(',') if v.strip()]
 
 
 class BaseFloatListFilter(BaseFilter):
@@ -266,7 +272,7 @@ def convert(*args):
         See :mod:`flask_admin.contrib.sqla.filters` for usage example.
     """
     def _inner(func):
-        func._converter_for = list(map(str.lower, args))
+        func._converter_for = list(map(lambda x: x.lower(), args))
         return func
     return _inner
 

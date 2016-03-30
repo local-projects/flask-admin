@@ -1,6 +1,32 @@
 Changelog
 =========
 
+1.4.0
+-----
+
+* Updated and reworked documentation
+* FileAdmin went through minor refactoring and now supports remote file systems. Comes with the new, optional, AWS S3 file management interface
+* Configurable CSV export for model views
+* Added overridable URL generation logic. Allows using custom URLs with parameters for administrative views
+* Added column_display_actions to ModelView control visibility of the action column without overriding the template
+* Added support for the latest MongoEngine
+* New SecureForm base class for easier CSRF validation
+* Lots of translation-related fixes and updated translations
+* Bug fixes
+
+1.3.0
+-----
+
+* New feature: Edit models in the list view in a popup
+* New feature: Read-only model details view
+* Fixed XSS in column_editable_list values
+* Improved navigation consistency in model create and edit views
+* Ability to choose page size in model list view
+* Updated client-side dependencies (jQuery, Select2, etc)
+* Updated documentation and examples
+* Updated translations
+* Bug fixes
+
 1.2.0
 -----
 
@@ -22,36 +48,3 @@ Mostly bug fix release. Highlights:
 * FileAdmin refactoring and fixes
 * FileUploadField and ImageUploadField will work with Required() validator
 * Bug fixes
-
-
-1.0.9
------
-
-Highlights:
-
-* Bootstrap 3 support
-* WTForms 2.x support
-* Updated DateTime picker
-* SQLAlchemy backend: support for complex sortables, ability to search for related models, model inheritance support
-* Customizable URL generation logic for all views
-* New generic filter types: in list, empty, date range
-* Added the ``geoa`` contrib module, for working with `geoalchemy2 <http://geoalchemy-2.readthedocs.org/>`_
-* Portugese translation
-* Lots of bug fixes
-
-
-1.0.8
------
-
-Highlights:
-
-* Cleaned up documentation, many thanks to Petrus Janse van Rensburg.
-* More flexible menu system, ability to add links to menus
-* Human-readable filter URLs
-* Callable filter `options`
-* `EmailField` filter
-* Simple accessibility fixes
-* `InlineFormField` now accepts `widget_args` and `form_rules` arguments
-* Support for newer wtforms versions
-* `form_rules` property that affects both create and edit forms
-* Lots of bugfixes

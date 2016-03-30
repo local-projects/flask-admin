@@ -6,7 +6,7 @@ from flask_admin._compat import PY2, as_unicode
 if not PY2:
     raise SkipTest('MongoEngine is not Python 3 compatible')
 
-from wtforms import fields
+from wtforms import fields, validators
 
 from flask_admin import form
 from flask_admin.contrib.mongoengine import ModelView
@@ -59,8 +59,8 @@ def fill_db(Model1, Model2):
     Model1('test1_val_4', 'test2_val_4').save()
     Model1(None, 'empty_obj').save()
 
-    Model2('string_field_val_1', None, None).save()
-    Model2('string_field_val_2', None, None).save()
+    Model2('string_field_val_1', None, None, True).save()
+    Model2('string_field_val_2', None, None, False).save()
     Model2('string_field_val_3', 5000, 25.9).save()
     Model2('string_field_val_4', 9000, 75.5).save()
     Model2('string_field_val_5', 6169453081680413441).save()
@@ -148,8 +148,7 @@ def test_column_editable_list():
     Model1, Model2 = create_models(db)
 
     view = CustomModelView(Model1,
-                           column_editable_list=[
-                               'test1', 'datetime_field'])
+                           column_editable_list=['test1', 'datetime_field'])
     admin.add_view(view)
 
     fill_db(Model1, Model2)
@@ -164,7 +163,8 @@ def test_column_editable_list():
     # Form - Test basic in-line edit functionality
     obj1 = Model1.objects.get(test1 = 'test1_val_3')
     rv = client.post('/admin/model1/ajax/update/', data={
-        'test1-' + str(obj1.id): 'change-success-1',
+        'list_form_pk': str(obj1.id),
+        'test1': 'change-success-1',
     })
     data = rv.data.decode('utf-8')
     ok_('Record was successfully saved.' == data)
@@ -177,33 +177,35 @@ def test_column_editable_list():
     # Test validation error
     obj2 = Model1.objects.get(test1 = 'datetime_obj1')
     rv = client.post('/admin/model1/ajax/update/', data={
-        'datetime_field-' + str(obj2.id): 'problematic-input',
+        'list_form_pk': str(obj2.id),
+        'datetime_field': 'problematic-input',
     })
     eq_(rv.status_code, 500)
 
     # Test invalid primary key
     rv = client.post('/admin/model1/ajax/update/', data={
-        'test1-1000': 'problematic-input',
+        'list_form_pk': '1000',
+        'test1': 'problematic-input',
     })
     data = rv.data.decode('utf-8')
     eq_(rv.status_code, 500)
 
     # Test editing column not in column_editable_list
     rv = client.post('/admin/model1/ajax/update/', data={
-        'test2-1': 'problematic-input',
+        'list_form_pk': '1',
+        'test2': 'problematic-input',
     })
     data = rv.data.decode('utf-8')
-    eq_(rv.status_code, 500)
+    ok_('problematic-input' not in data)
 
     # Test in-line editing for relations
-    view = CustomModelView(Model2,
-                           column_editable_list=[
-                               'model1'])
+    view = CustomModelView(Model2, column_editable_list=['model1'])
     admin.add_view(view)
 
     obj3 = Model2.objects.get(string_field = 'string_field_val_1')
     rv = client.post('/admin/model2/ajax/update/', data={
-        'model1-' + str(obj3.id): str(obj1.id),
+        'list_form_pk': str(obj3.id),
+        'model1': str(obj1.id),
     })
     data = rv.data.decode('utf-8')
     ok_('Record was successfully saved.' == data)
@@ -466,6 +468,49 @@ def test_column_filters():
     ok_('string_field_val_3' not in data)
     ok_('string_field_val_4' not in data)
 
+    # Test boolean filter
+    view = CustomModelView(Model2, column_filters=['bool_field'],
+                           endpoint="_bools")
+    admin.add_view(view)
+
+    eq_([(f['index'], f['operation']) for f in view._filter_groups[u'Bool Field']],
+        [
+            (0, 'equals'),
+            (1, 'not equal'),
+        ])
+
+    # boolean - equals - Yes
+    rv = client.get('/admin/_bools/?flt0_0=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' in data)
+    ok_('string_field_val_2' not in data)
+    #ok_('string_field_val_3' not in data)
+
+    # boolean - equals - No
+    rv = client.get('/admin/_bools/?flt0_0=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' not in data)
+    ok_('string_field_val_2' in data)
+    #ok_('string_field_val_3' in data)
+
+    # boolean - not equals - Yes
+    rv = client.get('/admin/_bools/?flt0_1=1')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' not in data)
+    ok_('string_field_val_2' in data)
+    #ok_('string_field_val_3' in data)
+
+    # boolean - not equals - No
+    rv = client.get('/admin/_bools/?flt0_1=0')
+    eq_(rv.status_code, 200)
+    data = rv.data.decode('utf-8')
+    ok_('string_field_val_1' in data)
+    ok_('string_field_val_2' not in data)
+    #ok_('string_field_val_3' not in data)
+
     # Test float filter
     view = CustomModelView(Model2, column_filters=['float_field'],
                            endpoint="_float")
@@ -686,7 +731,6 @@ def test_extra_field_order():
 
     view = CustomModelView(
         Model1,
-        form_columns=('extra_field', 'test1'),
         form_extra_fields={
             'extra_field': fields.StringField('Extra Field')
         }
@@ -700,9 +744,10 @@ def test_extra_field_order():
 
     # Check presence and order
     data = rv.data.decode('utf-8')
+    ok_('Extra Field' in data)
     pos1 = data.find('Extra Field')
     pos2 = data.find('Test1')
-    ok_(pos2 > pos1)
+    ok_(pos2 < pos1)
 
 
 def test_custom_form_base():
@@ -997,6 +1042,25 @@ def test_form_flat_choices():
     eq_(form.name.choices, [('a', 'a'), ('b', 'b'), ('c', 'c')])
 
 
+def test_form_args():
+    app, db, admin = setup()
+
+    class Model(db.Document):
+        test = db.StringField(required=True)
+
+    shared_form_args = {'test': {'validators': [validators.Regexp('test')]}}
+
+    view = CustomModelView(Model, form_args=shared_form_args)
+    admin.add_view(view)
+
+    # ensure shared field_args don't create duplicate validators
+    create_form = view.create_form()
+    eq_(len(create_form.test.validators), 2)
+
+    edit_form = view.edit_form()
+    eq_(len(edit_form.test.validators), 2)
+
+
 def test_form_args_embeddeddoc():
     app, db, admin = setup()
 
@@ -1037,3 +1101,37 @@ def test_simple_list_pager():
 
     count, data = view.get_list(0, None, None, None, None)
     ok_(count is None)
+
+
+def test_export_csv():
+    app, db, admin = setup()
+    Model1, Model2 = create_models(db)
+
+    view = CustomModelView(Model1, can_export=True,
+                           column_list=['test1', 'test2'], export_max_rows=2,
+                           endpoint='row_limit_2')
+    admin.add_view(view)
+
+    for x in range(5):
+        fill_db(Model1, Model2)
+
+    client = app.test_client()
+
+    # test export_max_rows
+    rv = client.get('/admin/row_limit_2/export/csv/')
+    data = rv.data.decode('utf-8')
+    eq_(rv.status_code, 200)
+    ok_("Test1,Test2\r\n"
+        "test1_val_1,test2_val_1\r\n"
+        "test1_val_2,test2_val_2\r\n" == data)
+
+    view = CustomModelView(Model1, can_export=True,
+                           column_list=['test1', 'test2'],
+                           endpoint='no_row_limit')
+    admin.add_view(view)
+
+    # test row limit without export_max_rows
+    rv = client.get('/admin/no_row_limit/export/csv/')
+    data = rv.data.decode('utf-8')
+    eq_(rv.status_code, 200)
+    ok_(len(data.splitlines()) > 21)

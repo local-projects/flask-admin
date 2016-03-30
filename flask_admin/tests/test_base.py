@@ -1,3 +1,5 @@
+import os
+
 from nose.tools import ok_, eq_, raises
 
 from flask import Flask, request, abort, url_for
@@ -157,7 +159,7 @@ def test_baseview_registration():
     # Verify generated blueprint properties
     eq_(bp.name, view.endpoint)
     eq_(bp.url_prefix, view.url)
-    eq_(bp.template_folder, 'templates/bootstrap2')
+    eq_(bp.template_folder, os.path.join('templates', 'bootstrap2'))
     eq_(bp.static_folder, view.static_folder)
 
     # Verify customizations
@@ -193,6 +195,15 @@ def test_baseview_urls():
     admin.add_view(view)
 
     eq_(len(view._urls), 2)
+
+
+def test_add_views():
+    app = Flask(__name__)
+    admin = base.Admin(app)
+
+    admin.add_views(MockView(endpoint='test1'), MockView(endpoint='test2'))
+
+    eq_(len(admin.menu()), 3)
 
 
 @raises(Exception)
@@ -376,6 +387,20 @@ def test_menu_links():
     admin = base.Admin(app)
     admin.add_link(base.MenuLink('TestMenuLink1', endpoint='.index'))
     admin.add_link(base.MenuLink('TestMenuLink2', url='http://python.org/'))
+
+    client = app.test_client()
+    rv = client.get('/admin/')
+
+    data = rv.data.decode('utf-8')
+    ok_('TestMenuLink1' in data)
+    ok_('TestMenuLink2' in data)
+
+
+def test_add_links():
+    app = Flask(__name__)
+    admin = base.Admin(app)
+    admin.add_links(base.MenuLink('TestMenuLink1', endpoint='.index'),
+                    base.MenuLink('TestMenuLink2', url='http://python.org/'))
 
     client = app.test_client()
     rv = client.get('/admin/')

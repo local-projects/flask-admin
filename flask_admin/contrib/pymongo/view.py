@@ -29,13 +29,38 @@ class ModelView(BaseModelView):
         Collection of the column filters.
 
         Should contain instances of
-        :class:`flask_admin.contrib.pymongo.filters.BasePyMongoFilter`
-        classes.
+        :class:`flask_admin.contrib.pymongo.filters.BasePyMongoFilter` classes.
+
+        Filters will be grouped by name when displayed in the drop-down.
 
         For example::
 
+            from flask_admin.contrib.pymongo.filters import BooleanEqualFilter
+
             class MyModelView(BaseModelView):
-                column_filters = (BooleanEqualFilter(User.name, 'Name'),)
+                column_filters = (BooleanEqualFilter(column=User.name, name='Name'),)
+
+        or::
+
+            from flask_admin.contrib.pymongo.filters import BasePyMongoFilter
+
+            class FilterLastNameBrown(BasePyMongoFilter):
+                def apply(self, query, value):
+                    if value == '1':
+                        return query.filter(self.column == "Brown")
+                    else:
+                        return query.filter(self.column != "Brown")
+
+                def operation(self):
+                    return 'is Brown'
+
+            class MyModelView(BaseModelView):
+                column_filters = [
+                    FilterLastNameBrown(
+                        column=User.last_name, name='Last Name',
+                        options=(('1', 'Yes'), ('0', 'No'))
+                    )
+                ]
     """
 
     def __init__(self, coll,
@@ -184,7 +209,7 @@ class ModelView(BaseModelView):
         return query
 
     def get_list(self, page, sort_column, sort_desc, search, filters,
-                 execute=True):
+                 execute=True, page_size=None):
         """
             Get list of objects from MongoEngine
 
@@ -200,6 +225,10 @@ class ModelView(BaseModelView):
                 List of applied fiters
             :param execute:
                 Run query immediately or not
+            :param page_size:
+                Number of results. Defaults to ModelView's page_size. Can be
+                overriden to change the page_size limit. Removing the page_size
+                limit requires setting page_size to 0 or False.
         """
         query = {}
 
@@ -236,12 +265,15 @@ class ModelView(BaseModelView):
                 sort_by = [(order[0], pymongo.DESCENDING if order[1] else pymongo.ASCENDING)]
 
         # Pagination
-        skip = None
+        if page_size is None:
+            page_size = self.page_size
 
-        if page is not None:
-            skip = page * self.page_size
+        skip = 0
 
-        results = self.coll.find(query, sort=sort_by, skip=skip, limit=self.page_size)
+        if page and page_size:
+            skip = page * page_size
+
+        results = self.coll.find(query, sort=sort_by, skip=skip, limit=page_size)
 
         if execute:
             results = list(results)

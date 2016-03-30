@@ -2,11 +2,10 @@ import logging
 
 from flask import flash
 
-from flask_admin._compat import string_types
+from flask_admin._compat import string_types, iteritems
 from flask_admin.babel import gettext, ngettext, lazy_gettext
 from flask_admin.model import BaseModelView
-from flask_admin.model.form import wrap_fields_in_fieldlist
-from flask_admin.model.fields import ListEditableFieldList
+from flask_admin.model.form import create_editable_list_form
 
 from peewee import PrimaryKeyField, ForeignKeyField, Field, CharField, TextField
 
@@ -27,7 +26,9 @@ class ModelView(BaseModelView):
         Collection of the column filters.
 
         Can contain either field names or instances of
-        :class:`flask_admin.contrib.peewee.filters.BaseFilter` classes.
+        :class:`flask_admin.contrib.peewee.filters.BasePeeweeFilter` classes.
+
+        Filters will be grouped by name when displayed in the drop-down.
 
         For example::
 
@@ -36,8 +37,32 @@ class ModelView(BaseModelView):
 
         or::
 
+            from flask_admin.contrib.peewee.filters import BooleanEqualFilter
+
             class MyModelView(BaseModelView):
-                column_filters = (BooleanEqualFilter(User.name, 'Name'))
+                column_filters = (BooleanEqualFilter(column=User.name, name='Name'),)
+
+        or::
+
+            from flask_admin.contrib.peewee.filters import BasePeeweeFilter
+
+            class FilterLastNameBrown(BasePeeweeFilter):
+                def apply(self, query, value):
+                    if value == '1':
+                        return query.filter(self.column == "Brown")
+                    else:
+                        return query.filter(self.column != "Brown")
+
+                def operation(self):
+                    return 'is Brown'
+
+            class MyModelView(BaseModelView):
+                column_filters = [
+                    FilterLastNameBrown(
+                        column=User.last_name, name='Last Name',
+                        options=(('1', 'Yes'), ('0', 'No'))
+                    )
+                ]
     """
 
     model_form_converter = CustomModelConverter
@@ -149,7 +174,7 @@ class ModelView(BaseModelView):
         if model is None:
             model = self.model
 
-        return model._meta.get_sorted_fields()
+        return iteritems(model._meta.fields)
 
     def scaffold_pk(self):
         return get_primary_key(self.model)
@@ -239,26 +264,24 @@ class ModelView(BaseModelView):
 
         return form_class
 
-    def scaffold_list_form(self, custom_fieldlist=ListEditableFieldList,
-                           validators=None):
+    def scaffold_list_form(self, widget=None, validators=None):
         """
             Create form for the `index_view` using only the columns from
             `self.column_editable_list`.
 
+            :param widget:
+                WTForms widget class. Defaults to `XEditableWidget`.
             :param validators:
                 `form_args` dict with only validators
                 {'name': {'validators': [required()]}}
-            :param custom_fieldlist:
-                A WTForm FieldList class. By default, `ListEditableFieldList`.
         """
         form_class = get_form(self.model, self.model_form_converter(self),
                               base_class=self.form_base_class,
                               only=self.column_editable_list,
                               field_args=validators)
 
-        return wrap_fields_in_fieldlist(self.form_base_class,
-                                        form_class,
-                                        custom_fieldlist)
+        return create_editable_list_form(self.form_base_class, form_class,
+                                         widget)
 
     def scaffold_inline_form_models(self, form_class):
         converter = self.model_form_converter(self)
@@ -302,7 +325,28 @@ class ModelView(BaseModelView):
         return self.model.select()
 
     def get_list(self, page, sort_column, sort_desc, search, filters,
-                 execute=True):
+                 execute=True, page_size=None):
+        """
+            Return records from the database.
+
+            :param page:
+                Page number
+            :param sort_column:
+                Sort column name
+            :param sort_desc:
+                Descending or ascending sort
+            :param search:
+                Search query
+            :param filters:
+                List of filter tuples
+            :param execute:
+                Execute query immediately? Default is `True`
+            :param page_size:
+                Number of results. Defaults to ModelView's page_size. Can be
+                overriden to change the page_size limit. Removing the page_size
+                limit requires setting page_size to 0 or False.
+        """
+
         query = self.get_query()
 
         joins = set()
@@ -353,10 +397,14 @@ class ModelView(BaseModelView):
                 query, joins = self._order_by(query, joins, order[0], order[1])
 
         # Pagination
-        if page is not None:
-            query = query.offset(page * self.page_size)
+        if page_size is None:
+            page_size = self.page_size
 
-        query = query.limit(self.page_size)
+        if page_size:
+            query = query.limit(page_size)
+
+        if page and page_size:
+            query = query.offset(page * page_size)
 
         if execute:
             query = list(query.execute())

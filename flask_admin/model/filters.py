@@ -1,7 +1,6 @@
 import time
 import datetime
 
-from flask_admin._compat import text_type
 from flask_admin.babel import lazy_gettext
 
 
@@ -39,7 +38,7 @@ class BaseFilter(object):
             if callable(options):
                 options = options()
 
-            return [(v, text_type(n)) for v, n in options]
+            return options
 
         return None
 
@@ -161,7 +160,7 @@ class BaseDateBetweenFilter(BaseFilter):
         Apply method is different for each back-end.
     """
     def clean(self, value):
-        return [datetime.datetime.strptime(range, '%Y-%m-%d')
+        return [datetime.datetime.strptime(range, '%Y-%m-%d').date()
                 for range in value.split(' to ')]
 
     def operation(self):
@@ -169,7 +168,7 @@ class BaseDateBetweenFilter(BaseFilter):
 
     def validate(self, value):
         try:
-            value = [datetime.datetime.strptime(range, '%Y-%m-%d')
+            value = [datetime.datetime.strptime(range, '%Y-%m-%d').date()
                      for range in value.split(' to ')]
             # if " to " is missing, fail validation
             # sqlalchemy's .between() will not work if end date is before start date

@@ -1,5 +1,5 @@
-__version__ = '1.2.1-dev'
-__author__ = 'Serge S. Koval'
+__version__ = '1.4.0'
+__author__ = 'Flask-Admin team'
 __email__ = 'serge.koval+github@gmail.com'
 
 

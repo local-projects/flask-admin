@@ -1,5 +1,7 @@
-from flask_admin.babel import lazy_gettext
-from flask_admin.model import filters
+import datetime
+
+from flask.ext.admin.babel import lazy_gettext
+from flask.ext.admin.model import filters
 
 from .tools import parse_like_term
 from mongoengine.queryset import Q
@@ -264,6 +266,10 @@ class FilterConverter(filters.BaseFilterConverter):
                         FilterEmpty)
     reference_filters = (ReferenceObjectIdFilter,)
 
+    objectid_filters = (FilterObjectIdEqual, FilterObjectIdNotEqual,
+               FilterObjectIdIn, FilterObjectIdNotIn)
+    lists_filters = (FilterEqual, FilterNotEqual)
+
     def convert(self, type_name, column, name):
         filter_name = type_name.lower()
 
@@ -295,3 +301,11 @@ class FilterConverter(filters.BaseFilterConverter):
     @filters.convert('ReferenceField')
     def conv_reference(self, column, name):
         return [f(column, name) for f in self.reference_filters]
+
+    @filters.convert('ObjectIdField')
+    def conv_objectid(self, column, name):
+        return [f(column, name) for f in self.objectid_filters]
+
+    @filters.convert('ListField')
+    def conv_list(self, column, name):
+        return [f(column, name) for f in self.lists_filters]

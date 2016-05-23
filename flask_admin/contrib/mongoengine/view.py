@@ -461,12 +461,17 @@ class ModelView(BaseModelView):
         # prevents running complex Q queries and, as a result,
         # Flask-Admin does not support per-word searching like
         # in other backends
-        op, term = parse_like_term(search_term)
+        op, term = parse_like_term(search)
 
         criteria = None
-
+        
         for field in self._search_fields:
-            flt = {'%s__%s' % (field.name, op): term}
+            if isinstance(field, (mongoengine.base.fields.ObjectIdField)):
+                if ObjectId.is_valid(term):
+                    flt = {field.name: term}
+            else:
+                flt = {'%s__%s' % (field.name, op): term}
+                
             q = mongoengine.Q(**flt)
 
             if criteria is None:
@@ -474,7 +479,9 @@ class ModelView(BaseModelView):
             else:
                 criteria |= q
 
-        return query.filter(criteria)
+        query = query.filter(criteria)
+        return query
+
 
     def get_list(self, page, sort_column, sort_desc, search, filters,
                  execute=True, page_size=None):

@@ -211,11 +211,9 @@ class AjaxSelectMultipleField(AjaxSelectField):
     data = property(_get_data, _set_data)
 
     def process_formdata(self, valuelist):
-        self._formdata = set()
-
-        for field in valuelist:
-            for n in field.split(self.separator):
-                self._formdata.add(n)
+        # Cannot use set() here since it will destroy the order of the list
+        self._formdata = [val for field in valuelist 
+                          for val in field.split(self.separator)]
 
     def pre_validate(self, form):
         if self._invalid_formdata:

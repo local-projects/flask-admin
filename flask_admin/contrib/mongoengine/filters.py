@@ -400,6 +400,7 @@ class FilterConverter(filters.BaseFilterConverter):
 
         return None
 
+
     @filters.convert('StringField', 'EmailField', 'URLField')
     def conv_string(self, column, name):
         return [f(column, name) for f in self.strings]

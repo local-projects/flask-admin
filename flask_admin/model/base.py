@@ -1437,7 +1437,13 @@ class BaseModelView(BaseView, ActionsMixin):
 
     # Exception handler
     def handle_view_exception(self, exc):
-        if isinstance(exc, ValidationError):
+        # OperationError because this could be a MongoEngine integrity
+        # violation - such as violation of REVERSE_DELETE_RULE on a deletion
+        if isinstance(exc, (WTFValidationError, MongoValidationError)):
+            flash(as_unicode(exc), 'error')
+            return True
+
+        if isinstance(exc, OperationError) and 'refers' in str(exc):
             flash(as_unicode(exc), 'error')
             return True
 

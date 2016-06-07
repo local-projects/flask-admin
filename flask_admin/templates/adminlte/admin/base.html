@@ -44,6 +44,7 @@
           {% block menu_links  %}
           <div class="navbar-custom-menu">
               <ul class="nav navbar-nav navbar-right">
+                  {% if admin_view.admin.menu_links() %}
                   <li class="dropdown">
                       <a href="#" class="dropdown-toggle" data-toggle="dropdown">
                           Links <span class="caret"></span> &nbsp;
@@ -52,6 +53,7 @@
                           {{ layout.menu_links()  }}
                       </ul>
                   </li>
+                  {% endif %}
               </ul>
           </div>
           {% endblock %}

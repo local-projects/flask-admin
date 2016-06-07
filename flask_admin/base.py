@@ -464,6 +464,7 @@ class Admin(object):
                  static_url_path=None,
                  base_template=None,
                  template_mode=None,
+                 template_scheme='blue',
                  category_icon_classes=None):
         """
             Constructor.
@@ -491,7 +492,10 @@ class Admin(object):
                 Override base HTML template for all static views. Defaults to `admin/base.html`.
             :param template_mode:
                 Base template path. Defaults to `bootstrap2`. If you want to use
-                Bootstrap 3 integration, change it to `bootstrap3`.
+                Bootstrap 3 integration, change it to `bootstrap3`, for AdminLTE change to 'adminelte'.
+            :param template_scheme:
+                The color scheme of the given template. Current support only for AdminLTE.
+                Defaults to 'blue'.
             :param category_icon_classes:
                 A dict of category names as keys and html classes as values to be added to menu category icons.
                 Example: {'Favorites': 'glyphicon glyphicon-star'}
@@ -516,6 +520,7 @@ class Admin(object):
         self.subdomain = subdomain
         self.base_template = base_template or 'admin/base.html'
         self.template_mode = template_mode or 'bootstrap2'
+        self.template_scheme = template_scheme
         self.category_icon_classes = category_icon_classes or dict()
 
         # Add predefined index view

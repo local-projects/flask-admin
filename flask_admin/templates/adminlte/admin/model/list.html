@@ -81,12 +81,16 @@
                             {% endif %}
                             {% block list_row_actions_header %}
                                 {% if admin_view.column_display_actions %}
-                                <th width="50">&nbsp;</th>
+                                <th width="50">Edit</th>
                                 {% endif %}
                             {% endblock %}
                             {% set column = 0 %}
                             {% for c, name in list_columns %}
-                            <th class="column-header col-{{c}}">
+                        {% set width = "" %}
+                        {% if name=="Active" or name=="Status" %}{% set width = "80" %}{%endif%}
+                        {% if name=="Updated At" %}{% set width = "160" %}{%endif%}
+                            <th width="{{width}}" class="column-header col-{{c}}">
+
                                 {% if admin_view.is_sortable(c) %}
                                     {% if sort_column == column %}
                                         <a href="{{ sort_url(column, True) }}" title="{{ _gettext('Sort by %(name)s', name=name) }}">
@@ -114,6 +118,9 @@
                             {% endfor %}
 
                             {% block list_row_actions_header_end %}
+                    {%- if admin_view.can_delete -%}
+                    <th width="50">Delete</th>
+                    {%- endif -%}
                             {% endblock %}
                         {% endblock %}
                     </tr>
@@ -130,9 +137,15 @@
                             {% if admin_view.column_display_actions %}
                             <td class="list-buttons-column">
                                 {% block list_row_actions scoped %}
-                                  {% for action in list_row_actions %}
-                                  {{ action.render_ctx(get_pk_value(row), row) }}
-                                  {% endfor %}
+                        {%- if admin_view.can_edit -%}
+                            {%- if admin_view.edit_modal -%}
+                                {{ lib.add_modal_button(url=get_url('.edit_view', id=get_pk_value(row), url=return_url, modal=True), title=_gettext('Edit record'), content='<i class="fa fa-edit"></i> Edit') }}
+                            {% else %}
+                                <a class="btn btn-lg" style="padding:0px;" href="{{ get_url('.edit_view', id=get_pk_value(row), url=return_url) }}" title="{{ _gettext('Edit record') }}">
+                                    <i class="fa fa-edit"></i>
+                                </a>
+                            {%- endif -%}
+                        {%- endif -%}
                                 {% endblock %}
                             </td>
                             {%- endif -%}
@@ -152,6 +165,25 @@
                             {% endif %}
                             </td>
                         {% endfor %}
+                {% block list_row_actions_column_end scoped %}
+                {%- if admin_view.can_delete -%}
+                <td>
+                    <form method="POST" action="{{ get_url('.delete_view') }}">
+                        {{ delete_form.id(value=get_pk_value(row)) }}
+                        {{ delete_form.url(value=return_url) }}
+                        {% if delete_form.csrf_token %}
+                        {{ delete_form.csrf_token }}
+                        {% elif csrf_token %}
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        {% endif %}
+                        <button class="btn btn-link btn-lg" style="padding:0px;" onclick="return confirm('{{ _gettext('Are you sure you want to delete this record?') }}');" title="Delete record">
+                            <i class="fa fa-trash"></i>
+                        </button>
+                    </form>
+                </td>
+                {%- endif -%}
+                {% endblock %}
+
                     {% endblock %}
                 </tr>
                 {% else %}
@@ -211,4 +243,9 @@
             {% endif %}
         })(jQuery);
     </script>
+{% endblock %}
+
+{% block tail_js %}
+    {{ super() }}
+    {# Load your custom JS files here #}
 {% endblock %}

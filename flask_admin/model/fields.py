@@ -211,7 +211,12 @@ class AjaxSelectMultipleField(AjaxSelectField):
     data = property(_get_data, _set_data)
 
     def process_formdata(self, valuelist):
-        # Cannot use set() here since it will destroy the order of the list
+        # Set the default separator
+        separator = getattr(self, 'separator', ',')
+
+        # IMPORTANT!! Cannot use set() here since it will destroy the order of the list!
+        # This is different from the upstream implementation!
+
         self._formdata = [val for field in valuelist 
                           for val in field.split(self.separator)]
 

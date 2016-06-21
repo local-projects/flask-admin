@@ -409,7 +409,7 @@ class ModelView(BaseModelView):
     def scaffold_filters(self, name):
         """Handle the column filters and apply custom logic as needed
         """
-        # We may have fields that are not explicitly on the model, such as "articles"
+        # We may have fields that are not explicitly on the model, meaning those that are referenced
         for delimiter in [".", "__"]:
             if delimiter in name:
                 column, subfield = name.split(delimiter)
@@ -531,10 +531,7 @@ class ModelView(BaseModelView):
             else:
                 criteria |= q
 
-        query = query.filter(criteria)
-
-        return query
-
+        return query.filter(criteria)
 
     def get_list(self, page, sort_column, sort_desc, search, filters,
                  execute=True, page_size=None):

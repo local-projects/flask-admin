@@ -7,8 +7,8 @@ from math import ceil
 
 from werkzeug import secure_filename
 
-from flask import (request, redirect, flash, abort, json, Response,
-                   get_flashed_messages, stream_with_context)
+from flask import (current_app, request, redirect, flash, abort, json,
+                   Response, get_flashed_messages, stream_with_context)
 from jinja2 import contextfunction
 try:
     import tablib
@@ -1442,6 +1442,9 @@ class BaseModelView(BaseView, ActionsMixin):
         if isinstance(exc, (WTFValidationError, MongoValidationError)):
             flash(as_unicode(exc), 'error')
             return True
+
+        if current_app.config.get('ADMIN_RAISE_ON_VIEW_EXCEPTION'):
+            raise
 
         if isinstance(exc, OperationError) and 'refers' in str(exc):
             flash(as_unicode(exc), 'error')

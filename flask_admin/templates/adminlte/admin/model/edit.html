@@ -2,6 +2,13 @@
 {% import 'admin/lib.html' as lib with context %}
 {% from 'admin/lib.html' import extra with context %} {# backward compatible #}
 
+{% block head_css %}
+    <link href="{{ url_for('admin.static', filename='vendor/select2/select2.css') }}" rel="stylesheet">
+    {{super()}}
+    <link href="https://gitcdn.github.io/bootstrap-toggle/2.2.0/css/bootstrap-toggle.min.css" rel="stylesheet">
+    <link href="{{ url_for('admin.static', filename='adminlte/plugins/bootstrap-slider/slider.css') }}" rel="stylesheet">
+{% endblock %}
+
 {% block body_header %}
     <h1>{{ admin_view.name }} {% if admin_view.subcategory %}({{admin_view.category}}){% endif %}</h1>
     {% if admin_view.description %}<h6 style="margin-bottom:0;">{{admin_view.description}}</h6>{% endif %}
@@ -15,6 +22,8 @@
 {% block body %}
 <div class="box">
     <div class="box-body">
+
+
       {% block navlinks %}
       <div class="nav-tabs-custom">
         <ul class="nav nav-tabs">
@@ -41,6 +50,7 @@
       {% block edit_form %}
         {{ lib.render_form(form, return_url, extra(), form_opts) }}
       {% endblock %}
+
     </div>
 </div>
 {% endblock %}
@@ -49,3 +59,12 @@
   {{ super() }}
   {{ lib.form_js() }}
 {% endblock %}
+
+{% block tail_js %}
+    {{ super() }}
+    <script src="https://gitcdn.github.io/bootstrap-toggle/2.2.0/js/bootstrap-toggle.min.js"></script>
+    <script src="{{ url_for('admin.static', filename='vendor/jquery.plugin.min.js')}}"></script>
+    <script src="{{ url_for('admin.static', filename='vendor/jquery.maxlength.min.js')}}"></script>
+    <script src="{{ url_for('admin.static', filename='adminlte/js/autosize.min.js')}}"></script>
+{% endblock %}
+

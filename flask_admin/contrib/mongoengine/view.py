@@ -144,7 +144,14 @@ class ModelView(BaseModelView):
 
     allowed_search_types = (mongoengine.StringField,
                             mongoengine.URLField,
-                            mongoengine.EmailField)
+                            mongoengine.EmailField,
+                            mongoengine.ListField,
+                            mongoengine.ObjectIdField,
+                            mongoengine.IntField,
+                            mongoengine.FloatField,
+                            mongoengine.DateTimeField,
+                            mongoengine.EmbeddedDocumentField
+                            )
     """
         List of allowed search field types.
     """
@@ -399,7 +406,8 @@ class ModelView(BaseModelView):
                     # Check type
                     if not isinstance(p, self.allowed_search_types):
                             raise Exception('Can only search on text columns. ' +
-                                            'Failed to setup search for "%s"' % p)
+                                            'Failed to setup search for field "%s (%s)"'%
+                                            (p.name, str(p)))
 
                     self._search_fields.append(p)
 

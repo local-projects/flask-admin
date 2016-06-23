@@ -174,7 +174,7 @@ if ($().sortable) {
             });
         });
 
-        // For LPInputFields and LPTextAreaFields
+        // For Custom InputFields and TextAreaFields which support the data-maxlength attribute
         // All options can be set with data-* attributes, falling
         // back to defaults if not given.
         //

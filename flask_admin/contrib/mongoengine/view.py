@@ -1,19 +1,19 @@
 import logging
 
-from flask import request, flash, abort, Response
+from flask import request, flash, abort, Response, current_app
 
 from flask_admin import expose
 from flask_admin.babel import gettext, ngettext, lazy_gettext
 from flask_admin.model import BaseModelView
 from flask_admin.model.form import create_editable_list_form
-from flask_admin._compat import iteritems, string_types
+from flask_admin._compat import iteritems, string_types, as_unicode
 
 import mongoengine
 import gridfs
 from mongoengine.connection import get_db
 from mongoengine.fields import ReferenceField, ListField, EmbeddedDocumentField
 from bson.objectid import ObjectId
-
+from wtforms.validators import ValidationError as wtfValidationError
 from flask_admin.actions import action
 from .filters import (
     FilterConverter, BaseMongoEngineFilter, FilterEqual, FilterNotEqual, FilterObjectIdEqual,
@@ -616,6 +616,30 @@ class ModelView(BaseModelView):
                           error=format_error(ex)),
                   'error')
             return None
+
+    def handle_view_exception(self, exc):
+        """
+        Override of parent handle_view_exception to accommodate mongo exceptions
+        :param exc:
+        :return:
+        """
+        if isinstance(exc, (wtfValidationError, mongoengine.ValidationError)):
+            flash(as_unicode(exc), 'error')
+            return True
+
+        if current_app.config.get('ADMIN_RAISE_ON_VIEW_EXCEPTION'):
+            raise
+
+        # OperationError because this could be a MongoEngine integrity
+        # violation - such as violation of REVERSE_DELETE_RULE on a deletion
+        if isinstance(exc, mongoengine.OperationError) and 'refers' in str(exc):
+            flash(as_unicode(exc), 'error')
+            return True
+
+        if self._debug:
+            raise
+
+        return False
 
     def create_model(self, form):
         """

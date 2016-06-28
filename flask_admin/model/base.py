@@ -7,7 +7,7 @@ from math import ceil
 
 from werkzeug import secure_filename
 
-from flask import (current_app, request, redirect, flash, abort, json,
+from flask import (request, redirect, flash, abort, json,
                    Response, get_flashed_messages, stream_with_context)
 from jinja2 import contextfunction
 try:
@@ -1437,22 +1437,11 @@ class BaseModelView(BaseView, ActionsMixin):
 
     # Exception handler
     def handle_view_exception(self, exc):
-        # OperationError because this could be a MongoEngine integrity
-        # violation - such as violation of REVERSE_DELETE_RULE on a deletion
-        if isinstance(exc, (WTFValidationError, MongoValidationError)):
+        if isinstance(exc, ValidationError):
             flash(as_unicode(exc), 'error')
             return True
-
-        if current_app.config.get('ADMIN_RAISE_ON_VIEW_EXCEPTION'):
-            raise
-
-        if isinstance(exc, OperationError) and 'refers' in str(exc):
-            flash(as_unicode(exc), 'error')
-            return True
-
         if self._debug:
             raise
-
         return False
 
     # Model event handlers

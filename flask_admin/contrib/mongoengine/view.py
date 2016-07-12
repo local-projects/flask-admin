@@ -530,6 +530,12 @@ class ModelView(BaseModelView):
             if isinstance(field, (mongoengine.base.fields.ObjectIdField)):
                 if ObjectId.is_valid(term):
                     flt = {field.name: term}
+                else:
+                    continue
+            elif field.name.startswith("_"):
+                # Don't process internal fields, such as _cls
+                # which will be used in cases of inherited document classes
+                continue
             else:
                 flt = {'%s__%s' % (field if isinstance(field, (str, unicode)) else field.name, op): term}
             q = mongoengine.Q(**flt)

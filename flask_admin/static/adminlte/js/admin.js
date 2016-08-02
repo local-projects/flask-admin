@@ -326,7 +326,7 @@ $(function() {
         });
     });
 
-    // For LPInputFields and LPTextAreaFields
+    // For FAWInputFields and FAWTextAreaFields
     // All options can be set with data-* attributes, falling
     // back to defaults if not given.
     //

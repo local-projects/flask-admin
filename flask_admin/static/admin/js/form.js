@@ -574,7 +574,7 @@ var AdminForm = function() {
     this.applyGlobalStyles = function(parent) {
         var self = this;
 
-        $(':input[data-role], a[data-role]', parent).each(function() {
+        $('[data-role]', parent).each(function() {
             var $el = $(this);
             self.applyStyle($el, $el.attr('data-role'));
         });
@@ -602,7 +602,3 @@ $('body').on('click', '.inline-remove-field' , function(e) {
 // Expose faForm globally
 var faForm = window.faForm = new AdminForm();
 
-// Apply global styles for current page after page loaded
-$(function() {
-    faForm.applyGlobalStyles(document);
-});

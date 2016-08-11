@@ -187,7 +187,7 @@
     <hr>
     <div class="form-group">
       <div class="col-md-offset-2 col-md-10 submit-row">
-        <input type="submit" class="btn btn-primary" value="{{ _gettext('Save') }}" />
+        <button type="button" class="btn btn-primary faSaveBtn" onclick="faEvents.submitForm.handler(this)">{{ _gettext('Save') }}</button>
         {% if extra %}
         {{ extra }}
         {% endif %}
@@ -233,14 +233,14 @@
   {% if editable_columns %}
   <script src="{{ admin_static.url(filename='vendor/x-editable/js/bootstrap3-editable.min.js', v='1.5.1.1') }}"></script>
   {% endif %}
-  <script src="{{ admin_static.url(filename='admin/js/form.js', v='1.0.1') }}"></script>
+  <script src="{{ admin_static.url(filename='admin/js/form.js', v='1.0.2') }}"></script>
 {% endmacro %}
 
 {% macro extra() %}
   {% if admin_view.can_create %}
-  <input name="_add_another" type="submit" class="btn btn-default" value="{{ _gettext('Save and Add Another') }}" />
+  <button name="_add_another" type="button" class="btn btn-default faSaveBtn" onclick="faEvents.submitForm.handler(this)">{{ _gettext('Save and Add Another') }}</button>
   {% endif %}
   {% if admin_view.can_edit %}
-  <input name="_continue_editing" type="submit" class="btn btn-default" value="{{ _gettext('Save and Continue Editing') }}" />
+  <button name="_continue_editing" type="button" class="btn btn-default faSaveBtn" onclick="faEvents.submitForm.handler(this)">{{ _gettext('Save and Continue Editing') }}</button>
   {% endif %}
 {% endmacro %}

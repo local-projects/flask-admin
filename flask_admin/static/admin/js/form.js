@@ -605,6 +605,10 @@ var faForm = window.faForm = new AdminForm();
 var faEvents = {
     submitForm: {
         handler: function(button) {
+            // Reset alerts
+            $(".alert-danger").remove();
+            $('.form-group').removeClass('has-error').removeClass('bg-danger');
+
             window.onbeforeunload = function() { return "Saving hasn't finished. Your work may be lost if you exit."; };
             $("#loading-overlay > .overlay-content > .progress").circleProgress({
                 value: 0,
@@ -675,17 +679,15 @@ var faEvents = {
         completeHandler:  function(event) {
             window.onbeforeunload = function () {}
             var response = $(event.target.responseText);
-            var errors = $(".alert-danger, .input-errors", response);
+            var errors = $(".input-errors", response);
             if(errors.length > 0)
             {
                 $(".alert-danger").remove();
                 $(errors).each(function() {
-                    var text = $.trim(String($(this).children().remove().end().text()));
-                    if(text == "This field is required." || text == "")
-                    {
-                        text = "A required field is missing.";
-                    }
-                    faEvents.submitForm.addAlert(text);
+                    var ref = $(this).parent().children('[name]').attr('id');
+                    var $ref = $('#' + ref).closest('.form-group')
+                    $ref.addClass('has-error').addClass('bg-danger');
+                    faEvents.submitForm.addAlert("A required field is missing.");
                 });
                 $(".faSaveBtn").prop("disabled", false);
                 $("#loading-overlay").removeClass("overlay-open");

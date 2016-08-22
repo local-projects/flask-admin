@@ -607,7 +607,7 @@ var faEvents = {
         handler: function(button) {
             // Reset alerts
             $(".alert-danger").remove();
-            $('.form-group').removeClass('has-error').removeClass('bg-danger');
+            $('.bg-danger.has-error').removeClass('has-error').removeClass('bg-danger');
 
             window.onbeforeunload = function() { return "Saving hasn't finished. Your work may be lost if you exit."; };
             $("#loading-overlay > .overlay-content > .progress").circleProgress({

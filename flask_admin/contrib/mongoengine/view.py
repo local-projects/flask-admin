@@ -537,7 +537,8 @@ class ModelView(BaseModelView):
                 # which will be used in cases of inherited document classes
                 continue
             else:
-                flt = {'%s__%s' % (field if isinstance(field, (str, unicode)) else field.name, op): term}
+                flt = {'%s__%s' %
+                       (field if isinstance(field, (str, unicode)) else field.name, op): term}
             q = mongoengine.Q(**flt)
 
             if criteria is None:

@@ -1309,6 +1309,12 @@ class BaseModelView(BaseView, ActionsMixin):
         """
         return get_redirect_target() or self.get_url('.index_view')
 
+    def get_return_url(self):
+        """
+            Return url where user is redirected on cancel on form create and edit.
+        """
+        return get_redirect_target() or self.get_url('.index_view')
+
     def _get_ruleset_missing_fields(self, ruleset, form):
         missing_fields = []
 
@@ -1903,7 +1909,7 @@ class BaseModelView(BaseView, ActionsMixin):
         """
             Create model view
         """
-        return_url = get_redirect_target() or self.get_url('.index_view')
+        return_url = self.get_return_url()
 
         if not self.can_create:
             return redirect(return_url)
@@ -1949,7 +1955,7 @@ class BaseModelView(BaseView, ActionsMixin):
         """
             Edit model view
         """
-        return_url = get_redirect_target() or self.get_url('.index_view')
+        return_url = self.get_return_url()
 
         if not self.can_edit:
             return redirect(return_url)

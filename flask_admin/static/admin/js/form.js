@@ -607,7 +607,7 @@ var faEvents = {
         handler: function(button) {
             // Reset alerts
             $(".alert-danger").remove();
-            $('.form-group').removeClass('has-error').removeClass('bg-danger');
+            $('.bg-danger.has-error').removeClass('has-error').removeClass('bg-danger');
 
             window.onbeforeunload = function() { return "Saving hasn't finished. Your work may be lost if you exit."; };
             $("#loading-overlay > .overlay-content > .progress").circleProgress({
@@ -683,11 +683,11 @@ var faEvents = {
             if(errors.length > 0)
             {
                 $(".alert-danger").remove();
+                faEvents.submitForm.addAlert("Required field(s) missing.");
                 $(errors).each(function() {
-                    var ref = $(this).parent().children('[name]').attr('id');
-                    var $ref = $('#' + ref).closest('.form-group')
+                    var ref = $(this).parent().find('[name]').attr('id');
+                    var $ref = $('#' + ref).parents('.form-group').children('label');
                     $ref.addClass('has-error').addClass('bg-danger');
-                    faEvents.submitForm.addAlert("A required field is missing.");
                 });
                 $(".faSaveBtn").prop("disabled", false);
                 $("#loading-overlay").removeClass("overlay-open");

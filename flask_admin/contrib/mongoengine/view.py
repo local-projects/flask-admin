@@ -11,7 +11,7 @@ from flask_admin._compat import iteritems, string_types, as_unicode
 import mongoengine
 import gridfs
 from mongoengine.connection import get_db
-from mongoengine.fields import ReferenceField, ListField, EmbeddedDocumentField
+from mongoengine.fields import ObjectIdField, ReferenceField, ListField, EmbeddedDocumentField
 from bson.objectid import ObjectId
 from wtforms.validators import ValidationError as wtfValidationError
 from flask_admin.actions import action

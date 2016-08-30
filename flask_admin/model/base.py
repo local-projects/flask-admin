@@ -1703,7 +1703,10 @@ class BaseModelView(BaseView, ActionsMixin):
             :param column_type_formatters:
                 column_type_formatters to be used.
         """
-        column_fmt = column_formatters.get(name)
+        column_fmt = column_formatters.get(
+            '%s.%s' % (model._class_name, name),
+            column_formatters.get(name))
+
         if column_fmt is not None:
             value = column_fmt(self, context, model, name)
         else:

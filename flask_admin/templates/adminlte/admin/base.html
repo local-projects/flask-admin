@@ -5,12 +5,15 @@
   <head>
     <title>
     {% block title %}
-        {% if not admin_view.category is string %}
-            {% set page_title = admin_view.category|join(" - ") %}
-        {% else %}
-            {% set page_title = admin_view.category %}
+        {% if admin_view.category %}
+            {% if not admin_view.category is string %}
+                {% set page_title = admin_view.category|join(" - ") %}
+            {% else %}
+                {% set page_title = admin_view.category %}
+            {% endif %}
+            {{ page_title }} -
         {% endif %}
-        {% if admin_view.category %}{{ page_title }} - {% endif %}{{ admin_view.name }} - {{ admin_view.admin.name }}
+        {{ admin_view.name }} - {{ admin_view.admin.name }}
     {% endblock %}
     </title>
     {% block head_meta %}

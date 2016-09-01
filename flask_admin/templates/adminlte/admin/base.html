@@ -97,12 +97,16 @@
 
       <footer class="main-footer">
           {% block body_footer %}
-          <!-- To the right -->
-          <div class="pull-right">
-            <strong>CMS Version:</strong> <code>{{config._version}}</code>
-          </div>
-          <!-- Default to the left -->
-          <a href="#">CMS Documentation</a>
+              <!-- To the right -->
+              <div class="pull-right">
+                  {% block cms_version %}
+                  <strong>CMS Version:</strong> <code>{{config._version}}</code>
+                  {% endblock %}
+              </div>
+              <!-- Default to the left -->
+              {% block cms_documentation_link %}
+              <a target="_blank" href="{{config._documentation_link}}">CMS Documentation</a>
+              {% endblock%}
           {% endblock %}
       </footer>
 

@@ -608,6 +608,7 @@ var faEvents = {
             // Reset alerts
             $(".alert-danger").remove();
             $('.bg-danger.has-error').removeClass('has-error').removeClass('bg-danger');
+            $('.validation-error').remove();
 
             window.onbeforeunload = function() { return "Saving hasn't finished. Your work may be lost if you exit."; };
             $("#loading-overlay > .overlay-content > .progress").circleProgress({
@@ -683,11 +684,13 @@ var faEvents = {
             if(errors.length > 0)
             {
                 $(".alert-danger").remove();
-                faEvents.submitForm.addAlert("Required field(s) missing.");
+                faEvents.submitForm.addAlert("Please resolve errors.");
                 $(errors).each(function() {
+                    var text  = $(this).text().trim();
                     var ref = $(this).parent().find('[name]').attr('id');
                     var $ref = $('#' + ref).parents('.form-group').children('label');
                     $ref.addClass('has-error').addClass('bg-danger');
+                    $ref.append('<p class="validation-error">' + text + '</p>');
                 });
                 $(".faSaveBtn").prop("disabled", false);
                 $("#loading-overlay").removeClass("overlay-open");

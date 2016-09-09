@@ -1704,7 +1704,7 @@ class BaseModelView(BaseView, ActionsMixin):
                 column_type_formatters to be used.
         """
         column_fmt = column_formatters.get(
-            '%s.%s' % (model._class_name, name),
+            '%s.%s' % (model.__class__.__name__, name),
             column_formatters.get(name))
 
         if column_fmt is not None:

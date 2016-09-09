@@ -11,7 +11,7 @@ from flask_admin._compat import iteritems, string_types, as_unicode
 import mongoengine
 import gridfs
 from mongoengine.connection import get_db
-from mongoengine.fields import ReferenceField, ListField, EmbeddedDocumentField
+from mongoengine.fields import ObjectIdField, ReferenceField, ListField, EmbeddedDocumentField
 from bson.objectid import ObjectId
 from wtforms.validators import ValidationError as wtfValidationError
 from flask_admin.actions import action
@@ -537,7 +537,8 @@ class ModelView(BaseModelView):
                 # which will be used in cases of inherited document classes
                 continue
             else:
-                flt = {'%s__%s' % (field if isinstance(field, (str, unicode)) else field.name, op): term}
+                flt = {'%s__%s' %
+                       (field if isinstance(field, (str, unicode)) else field.name, op): term}
             q = mongoengine.Q(**flt)
 
             if criteria is None:

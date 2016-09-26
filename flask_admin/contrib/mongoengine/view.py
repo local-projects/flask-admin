@@ -1,6 +1,7 @@
 import logging
 
 from flask import request, flash, abort, Response, current_app
+from six import string_types
 
 from flask_admin import expose
 from flask_admin.babel import gettext, ngettext, lazy_gettext
@@ -538,7 +539,7 @@ class ModelView(BaseModelView):
                 continue
             else:
                 flt = {'%s__%s' %
-                       (field if isinstance(field, (str, unicode)) else field.name, op): term}
+                       (field if isinstance(field, string_types) else field.name, op): term}
             q = mongoengine.Q(**flt)
 
             if criteria is None:

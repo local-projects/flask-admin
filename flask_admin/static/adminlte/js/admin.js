@@ -43,7 +43,7 @@ $(function() {
     {
         objects.each(function() {
             $(this).trumbowyg({
-                btns: eval($(this).data("btns")) || [['bold', 'italic']],
+                btns: eval($(this).data("btns")) || [['bold', 'italic', 'viewHTML']],
                 autogrow: $(this).data("autogrow") || true,
                 semantic: $(this).data("semantic") || false,
                 removeformatPasted: $(this).data("removeformatPasted") || true,

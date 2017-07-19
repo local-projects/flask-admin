@@ -102,7 +102,7 @@ could be as simple as::
     class MicroBlogModelView(sqla.ModelView):
 
         def is_accessible(self):
-            return login.current_user.is_authenticated()
+            return login.current_user.is_authenticated
 
         def inaccessible_callback(self, name, **kwargs):
             # redirect to login page if user doesn't have access
@@ -265,6 +265,13 @@ When your forms contain foreign keys, have those **related models loaded via aja
             'fields': ['first_name', 'last_name', 'email'],
             'page_size': 10
         }
+    }
+
+To filter the results that are loaded via ajax, you can use::
+
+    form_ajax_refs = {
+        'active_user': QueryAjaxModelLoader('user', db.session, User,
+                                     filters=["is_active=True", "id>1000"])
     }
 
 To **manage related models inline**::

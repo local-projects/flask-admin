@@ -148,22 +148,11 @@ classes as follows::
         widget = CKTextAreaWidget()
 
     class MessageAdmin(ModelView):
+        extra_js = ['//cdn.ckeditor.com/4.6.0/standard/ckeditor.js']
+
         form_overrides = {
             'body': CKTextAreaField
         }
-        create_template = 'ckeditor.html'
-        edit_template = 'ckeditor.html'
-
-For this to work, you would also need to create a template that extends the default
-functionality by including the necessary CKEditor javascript on the `create` and
-`edit` pages. Save this in `templates/ckeditor.html`::
-
-    {% extends 'admin/model/edit.html' %}
-
-    {% block tail %}
-      {{ super() }}
-      <script src="//cdn.ckeditor.com/4.5.1/standard/ckeditor.js"></script>
-    {% endblock %}
 
 File & Image Fields
 *******************
@@ -428,8 +417,8 @@ The bare minimum you have to provide for Flask-Admin to work with PyMongo:
 This is minimal PyMongo view::
 
   class UserForm(Form):
-      name = TextField('Name')
-      email = TextField('Email')
+      name = StringField('Name')
+      email = StringField('Email')
 
   class UserView(ModelView):
       column_list = ('name', 'email')
@@ -519,7 +508,7 @@ do with it, so it won't generate a form field. In this case, you would need to m
     class MyView(ModelView):
         def scaffold_form(self):
             form_class = super(UserView, self).scaffold_form()
-            form_class.extra = TextField('Extra')
+            form_class.extra = StringField('Extra')
             return form_class
 
 Customizing Batch Actions

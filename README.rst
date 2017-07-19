@@ -4,10 +4,10 @@ Flask-Admin
 The project was recently moved into its own organization. Please update your
 references to *git@github.com:flask-admin/flask-admin.git*.
 
-.. image:: https://d322cqt584bo4o.cloudfront.net/flask-admin/localized.png
+.. image:: https://d322cqt584bo4o.cloudfront.net/flask-admin/localized.svg
 	:target: https://crowdin.com/project/flask-admin
 
-.. image:: https://travis-ci.org/flask-admin/flask-admin.png?branch=master
+.. image:: https://travis-ci.org/flask-admin/flask-admin.svg?branch=master
 	:target: https://travis-ci.org/flask-admin/flask-admin
 
 Introduction
@@ -56,8 +56,7 @@ if you think of anything else that should be included, then please make the chan
 
 To build the docs in your local environment, from the project directory::
 
-    pip install -r requirements-dev.txt
-    sudo make html
+    tox -e docs-html
 
 And if you want to preview any *.rst* snippets that you may want to contribute, go to `http://rst.ninjs.org/ <http://rst.ninjs.org/>`_.
 
@@ -94,6 +93,8 @@ For all the tests to pass successfully, you'll need Postgres & MongoDB to be run
 
     CREATE DATABASE flask_admin_test;
     CREATE EXTENSION postgis;
+
+You can also run the tests on multiple environments using *tox*.
 
 3rd Party Stuff
 ---------------

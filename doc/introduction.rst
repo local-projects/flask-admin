@@ -85,7 +85,7 @@ with your database models, and it doesn't require you to write any new view logi
 template code. So it's great for when you're deploying something that's still
 under development, before you want the whole world to see it.
 
-Have a look at `Flask-BasicAuth <http://flask-basicauth.readthedocs.org/>`_ to see just how
+Have a look at `Flask-BasicAuth <https://flask-basicauth.readthedocs.io/>`_ to see just how
 easy it is to put your whole application behind HTTP Basic Auth.
 
 Unfortunately, there is no easy way of applying HTTP Basic Auth just to your admin
@@ -96,13 +96,13 @@ Rolling Your Own
 For a more flexible solution, Flask-Admin lets you define access control rules
 on each of your admin view classes by simply overriding the `is_accessible` method.
 How you implement the logic is up to you, but if you were to use a low-level library like
-`Flask-Login <https://flask-login.readthedocs.org/>`_, then restricting access
+`Flask-Login <https://flask-login.readthedocs.io/>`_, then restricting access
 could be as simple as::
 
     class MicroBlogModelView(sqla.ModelView):
 
         def is_accessible(self):
-            return login.current_user.is_authenticated()
+            return login.current_user.is_authenticated
 
         def inaccessible_callback(self, name, **kwargs):
             # redirect to login page if user doesn't have access
@@ -265,6 +265,13 @@ When your forms contain foreign keys, have those **related models loaded via aja
             'fields': ['first_name', 'last_name', 'email'],
             'page_size': 10
         }
+    }
+
+To filter the results that are loaded via ajax, you can use::
+
+    form_ajax_refs = {
+        'active_user': QueryAjaxModelLoader('user', db.session, User,
+                                     filters=["is_active=True", "id>1000"])
     }
 
 To **manage related models inline**::

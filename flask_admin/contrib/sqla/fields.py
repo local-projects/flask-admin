@@ -3,8 +3,7 @@
 """
 import operator
 
-from wtforms import widgets
-from wtforms.fields import SelectFieldBase, TextField
+from wtforms.fields import SelectFieldBase, StringField
 from wtforms.validators import ValidationError
 
 try:
@@ -184,8 +183,8 @@ class QuerySelectMultipleField(QuerySelectField):
 
 class HstoreForm(BaseForm):
     """ Form used in InlineFormField/InlineHstoreList for HSTORE columns """
-    key = TextField(lazy_gettext('Key'))
-    value = TextField(lazy_gettext('Value'))
+    key = StringField(lazy_gettext('Key'))
+    value = StringField(lazy_gettext('Value'))
 
 
 class KeyValue(object):
@@ -277,7 +276,7 @@ class InlineModelFormList(InlineFieldList):
 
         # Handle request data
         for field in self.entries:
-            field_id = field.get_pk()
+            field_id = str(field.get_pk())
 
             is_created = field_id not in pk_map
             if not is_created:

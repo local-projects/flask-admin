@@ -46,6 +46,11 @@
                     {{ model_layout.filter_options() }}
                 </li>
                 {% endif %}
+                {% if can_set_page_size %}
+                <li class="dropdown">
+                    {{ model_layout.page_size_form(page_size_url) }}
+                </li>
+                {% endif %}
 
                 {% if actions %}
                 <li class="dropdown">
@@ -84,8 +89,8 @@
                                 <th width="50">Edit</th>
                                 {% endif %}
                             {% endblock %}
-                            {% set column = 0 %}
                             {% for c, name in list_columns %}
+                            {% set column = loop.index0 %}
                         {% set width = "" %}
                         {% if name=="Active" or name=="Status" %}{% set width = "80" %}{%endif%}
                         {% if name=="Updated At" %}{% set width = "160" %}{%endif%}
@@ -114,7 +119,6 @@
                                     ></a>
                                 {% endif %}
                             </th>
-                            {% set column = column + 1 %}
                             {% endfor %}
 
                             {% block list_row_actions_header_end %}
@@ -146,6 +150,10 @@
                                 </a>
                             {%- endif -%}
                         {%- endif -%}
+                          {% for action in list_row_actions %}
+                          {{ action.render_ctx(get_pk_value(row), row) }}
+                          {% endfor %}
+
                                 {% endblock %}
                             </td>
                             {%- endif -%}
@@ -242,6 +250,23 @@
                 );
             {% endif %}
         })(jQuery);
+
+        // Catch exception when closing dialog with <esc> key
+        // and prevent accidental deletions.
+        function safeConfirm(msg) {
+          try {
+            var isconfirmed = confirm(msg);
+            if (isconfirmed == true) {
+              return true;
+            }
+            else {
+              return false;
+            }
+          }
+          catch(err) {
+            return false;
+          }
+        }
     </script>
 {% endblock %}
 

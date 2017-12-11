@@ -1,5 +1,11 @@
+import datetime
+from gettext import gettext
+
+from mongoengine import EmbeddedDocumentField, StringField
+
 from flask_admin.babel import lazy_gettext
 from flask_admin.model import filters
+from flask_lpweb.helpers.misc import is_true
 
 from .tools import parse_like_term
 from mongoengine.queryset import Q
@@ -247,6 +253,128 @@ class ReferenceObjectIdFilter(BaseMongoEngineFilter):
         return lazy_gettext('ObjectId equals')
 
 
+class FilterObjectIdEqual(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        column_name = self.column.name
+
+        flt = {'%s' % column_name: value}
+        return query.filter(**flt)
+
+    def operation(self):
+        return gettext('ObjectId equal')
+
+class FilterObjectIdNotEqual(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        column_name = self.column.name
+        flt = {'%s__ne' % column_name: value}
+        return query.filter(**flt)
+
+    def operation(self):
+        return gettext('ObjectId not equal')
+
+class FilterObjectIdIn(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        column_name = self.column.name
+        value = [v.strip() for v in value.split(',')]
+        flt = {'%s__in' % column_name: value}
+        return query.filter(**flt)
+
+    def operation(self):
+        return gettext('ObjectId in')
+
+class FilterObjectIdNotIn(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        column_name = self.column.name
+        value = [v.strip() for v in value.split(',')]
+        flt = {'%s__nin' % column_name: value}
+        return query.filter(**flt)
+
+    def operation(self):
+        return gettext('ObjectId not in')
+
+ 
+class OIdsMatchFilter(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        flt = {self.column.name: ObjectId(value)}
+        return query.filter(**flt)
+
+    def operation(self):
+        return gettext('with id')
+   
+    # You can validate values. If value is not valid,
+    # return `False`, so filter will be ignored.
+    def validate(self, value):
+        return ObjectId.is_valid(value)
+
+    # You can "clean" values before they will be
+    # passed to the your data access layer
+    def clean(self, value):
+        return value
+
+class ExistenceFilter(BaseMongoEngineFilter):
+    def apply(self, query, value):
+        flt = { "%s__0__exists" % self.column.name: is_true(value) }
+        return query.filter(**flt)
+
+    def validate(self, value):
+        # Basically all values are valid since the is_true() function will process it
+        return True
+
+    def operation(self):
+        return gettext('exists')
+   
+    # You can "clean" values before they will be
+    # passed to the your data access layer
+    def clean(self, value):
+        return is_true(value)
+    
+class EmbeddedDocumentFieldFilter(BaseMongoEngineFilter):
+    """Return matches based on an embeddedDocument's string fields"""
+    def apply(self, query, value):
+        qfilt = None
+        if isinstance(self.column, EmbeddedDocumentField):
+            # Extract out all the string fields for comparison
+            for fieldname, fieldtype in self.column.document_type._fields.items():
+                if isinstance(fieldtype, (StringField)):
+                    if not qfilt:
+                        # qfilt = Q(applications__slug=value)
+                        qfilt = Q(**{"%s__%s" % (self.column.name, fieldname): value})
+                    else:
+                        qfilt = qfilt._combine(other=Q(**{"%s__%s" % (self.column.name, fieldname): value}), 
+                                               operation=Q.OR)
+            
+        return query.filter(qfilt)
+
+    def operation(self):
+        return gettext("contains")
+
+    def clean(self, value):
+        return value
+
+#     def validate(self, value):
+#         if not isinstance(self.column, EmbeddedDocumentField):
+#             raise Exception("Programming Error: Column %s is not an EmbeddedDocumentField." % str(self.column))
+
+
+class ReferenceFieldFilter(BaseMongoEngineFilter):
+    """Return matches based on a referenced field"""
+    def apply(self, query, value):
+        # If this is a referencefield, we may have to extract the specific referenced-field
+        flt = {self.column.name: value}
+        return query.filter(**flt)
+    
+    def operation(self):
+        return gettext("equals")
+    
+    def clean(self, value):
+        return value
+
+    # You can validate values. If value is not valid,
+    # return `False`, so filter will be ignored.
+    def validate(self, value):
+        return ObjectId.is_valid(value)
+
+
 # Base MongoEngine filter field converter
 class FilterConverter(filters.BaseFilterConverter):
     strings = (FilterLike, FilterNotLike, FilterEqual, FilterNotEqual,
@@ -264,6 +392,10 @@ class FilterConverter(filters.BaseFilterConverter):
                         FilterEmpty)
     reference_filters = (ReferenceObjectIdFilter,)
 
+    objectid_filters = (FilterObjectIdEqual, FilterObjectIdNotEqual,
+               FilterObjectIdIn, FilterObjectIdNotIn)
+    lists_filters = (FilterEqual, FilterNotEqual)
+
     def convert(self, type_name, column, name):
         filter_name = type_name.lower()
 
@@ -271,6 +403,7 @@ class FilterConverter(filters.BaseFilterConverter):
             return self.converters[filter_name](column, name)
 
         return None
+
 
     @filters.convert('StringField', 'EmailField', 'URLField')
     def conv_string(self, column, name):
@@ -295,3 +428,11 @@ class FilterConverter(filters.BaseFilterConverter):
     @filters.convert('ReferenceField')
     def conv_reference(self, column, name):
         return [f(column, name) for f in self.reference_filters]
+
+    @filters.convert('ObjectIdField')
+    def conv_objectid(self, column, name):
+        return [f(column, name) for f in self.objectid_filters]
+
+    @filters.convert('ListField')
+    def conv_list(self, column, name):
+        return [f(column, name) for f in self.lists_filters]

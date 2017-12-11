@@ -725,7 +725,7 @@ class BaseModelView(BaseView, ActionsMixin):
         for supported types.
     """
 
-    # Pagination settings
+    # Various settings
     page_size = 20
     """
         Default page size for pagination.
@@ -1763,7 +1763,10 @@ class BaseModelView(BaseView, ActionsMixin):
             :param column_type_formatters:
                 column_type_formatters to be used.
         """
-        column_fmt = column_formatters.get(name)
+        column_fmt = column_formatters.get(
+            '%s.%s' % (model.__class__.__name__, name),
+            column_formatters.get(name))
+
         if column_fmt is not None:
             value = column_fmt(self, context, model, name)
         else:

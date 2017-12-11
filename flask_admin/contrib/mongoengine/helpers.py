@@ -35,6 +35,15 @@ def format_error(error):
         return as_unicode(error)
 
     if isinstance(error, wtfValidationError):
-        return '. '.join(itervalues(error.to_dict()))
+        try:
+            return '. '.join(itervalues(error.to_dict()))
+        except Exception:
+            resp = ''
+            for v in error.to_dict().values():
+                if isinstance(v, dict):
+                    resp += str(v.values())
+                else:
+                    resp += str(v)
+            return resp
 
     return as_unicode(error)

@@ -1,20 +1,25 @@
 import logging
 
-from flask import request, flash, abort, Response
+from flask import request, flash, abort, Response, current_app
+from six import string_types
 
 from flask_admin import expose
 from flask_admin.babel import gettext, ngettext, lazy_gettext
 from flask_admin.model import BaseModelView
 from flask_admin.model.form import create_editable_list_form
-from flask_admin._compat import iteritems, string_types
+from flask_admin._compat import iteritems, string_types, as_unicode
 
 import mongoengine
 import gridfs
 from mongoengine.connection import get_db
+from mongoengine.fields import ObjectIdField, ReferenceField, ListField, EmbeddedDocumentField
 from bson.objectid import ObjectId
-
+from wtforms.validators import ValidationError as wtfValidationError
 from flask_admin.actions import action
-from .filters import FilterConverter, BaseMongoEngineFilter
+from .filters import (
+    FilterConverter, BaseMongoEngineFilter, FilterEqual, FilterNotEqual, FilterObjectIdEqual,
+    FilterObjectIdNotEqual, FilterObjectIdIn, FilterObjectIdNotIn, OIdsMatchFilter,
+    EmbeddedDocumentFieldFilter, ExistenceFilter)
 from .form import get_form, CustomModelConverter
 from .typefmt import DEFAULT_FORMATTERS
 from .tools import parse_like_term
@@ -140,7 +145,14 @@ class ModelView(BaseModelView):
 
     allowed_search_types = (mongoengine.StringField,
                             mongoengine.URLField,
-                            mongoengine.EmailField)
+                            mongoengine.EmailField,
+                            mongoengine.ListField,
+                            mongoengine.ObjectIdField,
+                            mongoengine.IntField,
+                            mongoengine.FloatField,
+                            mongoengine.DateTimeField,
+                            mongoengine.EmbeddedDocumentField
+                            )
     """
         List of allowed search field types.
     """
@@ -353,54 +365,103 @@ class ModelView(BaseModelView):
         """
         if self.column_searchable_list:
             for p in self.column_searchable_list:
-                if isinstance(p, string_types):
-                    p = self.model._fields.get(p)
+                if "__" in p:
+                    # This is an EmbeddedDocumentField
+                    field, subfield = p.split("__")
+                    field = self.model._fields.get(field)
+                    if not field:
+                        raise "Invalid search field %s" % p[0]
 
-                if p is None:
-                    raise Exception('Invalid search field')
+                    if type(field) not in self.allowed_search_types:
+                        raise Exception("Field %s is not of a type that can be searched. Given Type:" % (field.name, field))
 
-                field_type = type(p)
+                    # This is a weird case where we're going to send the field-name
+                    # to the search process
+                    self._search_fields.append(p)
 
-                # Check type
-                if (field_type not in self.allowed_search_types):
-                        raise Exception('Can only search on text columns. ' +
-                                        'Failed to setup search for "%s"' % p)
+                elif "." in p:
+                    # This is a ReferenceField
+                    field, subfield = p.split(".")
+                    field = self.model._fields.get(field)
+                    if not field:
+                        raise "Invalid search field %s" % p.split(".")[0]
 
-                self._search_fields.append(p)
+                    if isinstance(field, ReferenceField):
+                        s = field.document_type_obj
+                        s = s._fields.get(subfield)
+                        if not s:
+                            raise "Invalid search field %s in %s" % (subfield, field.name)
+
+                        if type(s) not in self.allowed_search_types:
+                            raise Exception("Field %s.%s is not of a type that can be searched. Given Type: %s" % (field.name, s.name, s))
+
+                        self._search_fields.append(p) # Append the string so the subfield can be grabbed during search
+
+                else:
+                    if isinstance(p, string_types):
+                        p = self.model._fields.get(p)
+
+                    if p is None:
+                        raise Exception('Invalid search field %s' % p)
+
+                    # Check type
+                    if not isinstance(p, self.allowed_search_types):
+                            raise Exception('Can only search on text columns. ' +
+                                            'Failed to setup search for field "%s (%s)"'%
+                                            (p.name, str(p)))
+
+                    self._search_fields.append(p)
 
         return bool(self._search_fields)
 
+
     def scaffold_filters(self, name):
+        """Handle the column filters and apply custom logic as needed
         """
-            Return filter object(s) for the field
+        # We may have fields that are not explicitly on the model, meaning those that are referenced
+        for delimiter in [".", "__"]:
+            if delimiter in name:
+                column, subfield = name.split(delimiter)
+                column = getattr(self.model, column)
+                # Remember need to break no not hit the for..else
+                break
 
-            :param name:
-                Either field name or field instance
-        """
-        if isinstance(name, string_types):
-            attr = self.model._fields.get(name)
         else:
-            attr = name
+            column = getattr(self.model, name)
 
-        if attr is None:
-            raise Exception('Failed to find field for filter: %s' % name)
-
-        # Find name
-        visible_name = None
-
-        if not isinstance(name, string_types):
-            visible_name = self.get_column_name(attr.name)
-
+        # Find the column name or translate into the appropriate field
+        visible_name = self.get_column_name(column.name)
         if not visible_name:
             visible_name = self.get_column_name(name)
 
-        # Convert filter
-        type_name = type(attr).__name__
-        flt = self.filter_converter.convert(type_name,
-                                            attr,
-                                            visible_name)
+        # Need to handle: ObjectIdField, ReferenceField, ListField(ReferenceField)
+        resp = []
+        if isinstance(column, (ObjectIdField, ReferenceField)):
+            resp.extend( [FilterObjectIdEqual(column, visible_name),
+                          FilterObjectIdNotEqual(column, visible_name),
+                          FilterObjectIdIn(column, visible_name),
+                          FilterObjectIdNotIn(column, visible_name),
+                          OIdsMatchFilter(column, visible_name)])
 
-        return flt
+        elif isinstance(column, ListField):
+            if isinstance(getattr(column, 'field', None), EmbeddedDocumentField):
+                resp.extend([EmbeddedDocumentFieldFilter(column, visible_name)])
+            else:
+                resp.extend([FilterEqual(column, visible_name),
+                             FilterNotEqual(column, visible_name)])
+                if isinstance(getattr(column, 'field', None), (ObjectIdField, ReferenceField)):
+                    resp.extend( [OIdsMatchFilter(column, visible_name),
+                                  ExistenceFilter(column, visible_name)] )
+
+        elif isinstance(column, EmbeddedDocumentField):
+            resp.extend([EmbeddedDocumentFieldFilter(column, visible_name)])
+
+        if resp:
+            return resp
+
+        else:
+            # Pass unhandled cases up the stack
+            return super(ModelView, self).scaffold_filters(name)
 
     def is_valid_filter(self, filter):
         """
@@ -466,7 +527,19 @@ class ModelView(BaseModelView):
         criteria = None
 
         for field in self._search_fields:
-            flt = {'%s__%s' % (field.name, op): term}
+            flt = {}
+            if isinstance(field, (mongoengine.base.fields.ObjectIdField)):
+                if ObjectId.is_valid(term):
+                    flt = {field.name: term}
+                else:
+                    continue
+            elif field.name.startswith("_"):
+                # Don't process internal fields, such as _cls
+                # which will be used in cases of inherited document classes
+                continue
+            else:
+                flt = {'%s__%s' %
+                       (field if isinstance(field, string_types) else field.name, op): term}
             q = mongoengine.Q(**flt)
 
             if criteria is None:
@@ -552,6 +625,30 @@ class ModelView(BaseModelView):
                   'error')
             return None
 
+    def handle_view_exception(self, exc):
+        """
+        Override of parent handle_view_exception to accommodate mongo exceptions
+        :param exc:
+        :return:
+        """
+        if isinstance(exc, (wtfValidationError, mongoengine.ValidationError)):
+            flash(as_unicode(exc), 'error')
+            return True
+
+        if current_app.config.get('ADMIN_RAISE_ON_VIEW_EXCEPTION'):
+            raise
+
+        # OperationError because this could be a MongoEngine integrity
+        # violation - such as violation of REVERSE_DELETE_RULE on a deletion
+        if isinstance(exc, mongoengine.OperationError) and 'refers' in str(exc):
+            flash(as_unicode(exc), 'error')
+            return True
+
+        if self._debug:
+            raise
+
+        return False
+
     def create_model(self, form):
         """
             Create model helper
@@ -565,6 +662,9 @@ class ModelView(BaseModelView):
             self._on_model_change(form, model, True)
             model.save()
         except Exception as ex:
+            if self._debug:
+                raise
+
             if not self.handle_view_exception(ex):
                 flash(gettext('Failed to create record. %(error)s',
                               error=format_error(ex)),

@@ -2,6 +2,7 @@ import mongoengine
 
 from flask_admin._compat import string_types, as_unicode, iteritems
 from flask_admin.model.ajax import AjaxModelLoader, DEFAULT_PAGE_SIZE
+from mongoengine.fields import ListField, EmbeddedDocumentField
 
 
 class QueryAjaxModelLoader(AjaxModelLoader):
@@ -95,14 +96,13 @@ def process_ajax_references(references, view):
             return as_unicode(name).lower()
 
     def handle_field(field, subdoc, base):
-        ftype = type(field).__name__
 
-        if ftype == 'ListField' or ftype == 'SortedListField':
+        if isinstance(field, ListField):
             child_doc = getattr(subdoc, '_form_subdocuments', {}).get(None)
 
             if child_doc:
                 handle_field(field.field, child_doc, base)
-        elif ftype == 'EmbeddedDocumentField':
+        elif isinstance(field, EmbeddedDocumentField):
             result = {}
 
             ajax_refs = getattr(subdoc, 'form_ajax_refs', {})

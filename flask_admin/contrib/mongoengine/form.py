@@ -80,26 +80,36 @@ class CustomModelConverter(orm.ModelConverter):
 
         ftype = type(field).__name__
 
+        override = self._get_field_override(field.name)
+
         if field.choices:
             kwargs['choices'] = list(self._convert_choices(field.choices))
 
+            if override:
+                return self._return_override(override, field, kwargs)
+            if ftype == "LPStringField":
+                return self.converters[ftype](model, field, kwargs)
             if ftype in self.converters:
                 kwargs["coerce"] = self.coerce(ftype)
             if kwargs.pop('multiple', False):
                 return fields.SelectMultipleField(**kwargs)
             return fields.SelectField(**kwargs)
 
-        ftype = type(field).__name__
-
         if hasattr(field, 'to_form_field'):
             return field.to_form_field(model, kwargs)
 
-        override = self._get_field_override(field.name)
         if override:
-            return override(**kwargs)
+            if hasattr(field, "html_attrs"):
+                kwargs["html_attrs"] = field.html_attrs
+            return self._return_override(override, field, kwargs)
 
         if ftype in self.converters:
             return self.converters[ftype](model, field, kwargs)
+
+    def _return_override(self, override, field, kwargs):
+        if hasattr(field, "field") and hasattr(field.field, "choices") and field.field.choices:
+            return override(field.field, **kwargs)  # pass in the subfield
+        return override(**kwargs)
 
     @orm.converts('DateTimeField')
     def conv_DateTime(self, model, field, kwargs):

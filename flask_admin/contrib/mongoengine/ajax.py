@@ -97,7 +97,7 @@ def process_ajax_references(references, view):
 
     def handle_field(field, subdoc, base):
 
-        if isinstance(field, ListField):
+        if isinstance(field, (ListField, mongoengine.SortedListField)):
             child_doc = getattr(subdoc, '_form_subdocuments', {}).get(None)
 
             if child_doc:

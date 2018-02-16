@@ -53,7 +53,19 @@ $(function() {
                 $(this).parent().find(".trumbowyg-editor").css("min-height", height);
                 $(this).height(height);
             }).on("tbwinit", function() {
-                var current_length = real_length($(this).trumbowyg('html'));
+                var $html = $(this).trumbowyg('html');
+
+                if ($html.lastIndexOf("<ul>") > -1){
+                    $html = $html.replace(new RegExp("<ul>", "g"), "<ul class='bullet-list'>");  
+                }
+
+                if ($html.lastIndexOf("<ol>") > -1){
+                    $html = $html.replace(new RegExp("<ol>", "g"), "<ol class='bullet-list'>");                    
+                }
+
+                $(this).trumbowyg('html', $html);
+ 
+                var current_length = real_length($html);
                 var feedback_box = $(".maxlength-feedback", $(this).parent());
                 if(feedback_box.length > 0)
                 {

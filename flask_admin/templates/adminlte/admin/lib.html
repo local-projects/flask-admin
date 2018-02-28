@@ -237,9 +237,9 @@
 {% endmacro %}
 
 {% macro extra() %}
-  {% if admin_view.can_create %}
-  <button name="_add_another" type="button" class="btn btn-default faSaveBtn" onclick="faEvents.submitForm.handler(this)">{{ _gettext('Save and Add Another') }}</button>
-  {% endif %}
+  <!--{% if admin_view.can_create %}-->
+  <!--<button name="_add_another" type="button" class="btn btn-default faSaveBtn" onclick="faEvents.submitForm.handler(this)">{{ _gettext('Save and Add Another') }}</button>-->
+  <!--{% endif %}-->
   {% if admin_view.can_edit %}
   <button name="_continue_editing" type="button" class="btn btn-default faSaveBtn" onclick="faEvents.submitForm.handler(this)">{{ _gettext('Save and Continue Editing') }}</button>
   {% endif %}

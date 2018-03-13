@@ -705,6 +705,7 @@ var faEvents = {
                     setTimeout(function() {
                         $("#loading-overlay").removeClass("overlay-open");
                     }, 300);
+                    if (window.onFlaskFormComplete) window.onFlaskFormComplete;
                 }
                 else {
                     window.location.href = event.target.responseURL;

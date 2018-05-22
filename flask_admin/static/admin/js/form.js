@@ -594,9 +594,11 @@ var AdminForm = function() {
 // Add on event handler
 $('body').on('click', '.inline-remove-field' , function(e) {
     e.preventDefault();
-
-    var form = $(this).closest('.inline-field');
-    form.remove();
+    section_title = $(this).parent().parent().text().trim()
+    if (confirm("Are you sure you want to delete " + section_title + "?")) {
+        var form = $(this).closest('.inline-field');
+        form.remove();
+    }
 });
 
 // Expose faForm globally
@@ -703,6 +705,7 @@ var faEvents = {
                     setTimeout(function() {
                         $("#loading-overlay").removeClass("overlay-open");
                     }, 300);
+                    if (window.onFlaskFormComplete) window.onFlaskFormComplete();
                 }
                 else {
                     window.location.href = event.target.responseURL;

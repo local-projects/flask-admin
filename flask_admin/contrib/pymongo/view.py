@@ -238,7 +238,7 @@ class ModelView(BaseModelView):
 
             for flt, flt_name, value in filters:
                 f = self._filters[flt]
-                data = f.apply(data, value)
+                data = f.apply(data, f.clean(value))
 
             if data:
                 if len(data) == 1:
@@ -262,7 +262,8 @@ class ModelView(BaseModelView):
             order = self._get_default_order()
 
             if order:
-                sort_by = [(order[0], pymongo.DESCENDING if order[1] else pymongo.ASCENDING)]
+                sort_by = [(col, pymongo.DESCENDING if desc else pymongo.ASCENDING)
+                           for (col, desc) in order]
 
         # Pagination
         if page_size is None:

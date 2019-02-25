@@ -11,7 +11,7 @@
 
         var opts = {
           width: 'resolve',
-          minimumInputLength: 1,
+          minimumInputLength: $el.attr('data-minimum-input-length'),
           placeholder: 'data-placeholder',
           ajax: {
             url: $el.attr('data-url'),
@@ -75,6 +75,10 @@
       function processLeafletWidget($el, name) {
         if (!window.MAPBOX_MAP_ID) {
           console.error("You must set MAPBOX_MAP_ID in your Flask settings to use the map widget");
+          return false;
+        }
+        if (!window.DEFAULT_CENTER_LAT || !window.DEFAULT_CENTER_LONG) {
+          console.error("You must set DEFAULT_CENTER_LAT and DEFAULT_CENTER_LONG in your Flask settings to use the map widget");
           return false;
         }
 
@@ -148,20 +152,24 @@
             map.fitBounds(bounds);
           }
         } else {
-          // look up user's location by IP address
-          $.getJSON("//ip-api.com/json/?callback=?", function(data) {
-            map.setView([data["lat"], data["lon"]], 12);
-          }).fail(function() {
-              map.setView([0, 0], 1)
-          });
+          // use the default map center
+          map.setView([window.DEFAULT_CENTER_LAT, window.DEFAULT_CENTER_LONG], 12);
         }
 
         // set up tiles
-        var mapboxVersion = window.MAPBOX_ACCESS_TOKEN ? 4 : 3;
-        L.tileLayer('//{s}.tiles.mapbox.com/v'+mapboxVersion+'/'+MAPBOX_MAP_ID+'/{z}/{x}/{y}.png?access_token='+window.MAPBOX_ACCESS_TOKEN, {
-          attribution: 'Map data &copy; <a href="//openstreetmap.org">OpenStreetMap</a> contributors, <a href="//creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, Imagery © <a href="//mapbox.com">Mapbox</a>',
-          maxZoom: 18
-        }).addTo(map);
+        if($el.data('tile-layer-url')){
+          var attribution = $el.data('tile-layer-attribution') || ''
+          L.tileLayer('//'+$el.data('tile-layer-url'), {
+            attribution: attribution,
+            maxZoom: 18
+          }).addTo(map)
+        } else {
+          var mapboxVersion = window.MAPBOX_ACCESS_TOKEN ? 4 : 3;
+          L.tileLayer('//{s}.tiles.mapbox.com/v'+mapboxVersion+'/'+MAPBOX_MAP_ID+'/{z}/{x}/{y}.png?access_token='+window.MAPBOX_ACCESS_TOKEN, {
+            attribution: 'Map data &copy; <a href="//openstreetmap.org">OpenStreetMap</a> contributors, <a href="//creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, Imagery © <a href="//mapbox.com">Mapbox</a>',
+            maxZoom: 18
+          }).addTo(map);
+        }
 
 
         // everything below here is to set up editing, so if we're not editable,
@@ -174,7 +182,8 @@
         var drawOptions = {
           draw: {
             // circles are not geometries in geojson
-            circle: false
+            circle: false,
+            circlemarker: false
           },
           edit: {
             featureGroup: editableLayers
@@ -195,34 +204,35 @@
         }
         var drawControl = new L.Control.Draw(drawOptions);
         map.addControl(drawControl);
+        if (window.MAPBOX_SEARCH) {
+          var circle = L.circleMarker([0, 0]);
+          var $autocompleteEl = $('<input style="position: absolute; z-index: 9999; display: block; margin: -42px 0 0 10px; width: 50%">');
+          var $form = $($el.get(0).form);
 
-        if (window.google) {
-          var geocoder = new google.maps.Geocoder();
-
-          function googleGeocoding(text, callResponse) {
-            geocoder.geocode({address: text}, callResponse);
-          }
-
-          function filterJSONCall(rawjson) {
-            var json = {}, key, loc, disp = [];
-            for (var i in rawjson) {
-              key = rawjson[i].formatted_address;
-              loc = L.latLng(rawjson[i].geometry.location.lat(),
-                             rawjson[i].geometry.location.lng());
-              json[key] = loc;
+          $autocompleteEl.insertAfter($map);
+          $form.on('submit', function (evt) {
+            if ($autocompleteEl.is(':focus')) {
+              evt.preventDefault();
+              return false;
             }
-            return json;
-          }
-
-          map.addControl(new L.Control.Search({
-            callData: googleGeocoding,
-            filterJSON: filterJSONCall,
-            markerLocation: true,
-            autoType: false,
-            autoCollapse: true,
-            minLength: 2,
-            zoom: 10
-          }));
+          });
+          var autocomplete = new google.maps.places.Autocomplete($autocompleteEl.get(0));
+          autocomplete.addListener('place_changed', function() {
+            var place = autocomplete.getPlace();
+            var loc = place.geometry.location;
+            var viewport = place.geometry.viewport;
+            circle.setLatLng(L.latLng(loc.lat(), loc.lng()));
+            circle.addTo(map);
+            if (viewport) {
+              map.fitBounds([
+                viewport.getNorthEast().toJSON(),
+                viewport.getSouthWest().toJSON(),
+              ]);
+            }
+            else {
+              map.fitBounds(circle.getBounds());
+            }
+          });
         }
 
 
@@ -294,6 +304,8 @@
 
                 if ($el.attr('data-allow-blank'))
                     opts['allowClear'] = true;
+
+                opts['minimumInputLength'] = $el.attr('data-minimum-input-length');
 
                 if ($el.attr('data-tags')) {
                     $.extend(opts, {
@@ -450,7 +462,8 @@
                     params: overrideXeditableParams,
                     combodate: {
                         // prevent minutes from showing in 5 minute increments
-                        minuteStep: 1
+                        minuteStep: 1,
+                        maxYear: 2030,
                     }
                 });
                 return true;
@@ -481,15 +494,21 @@
             case 'x-editable-boolean':
                 $el.editable({
                     params: overrideXeditableParams,
-                    display: function(value, sourceData, response) {
-                       // display new boolean value as an icon
-                       if(response) {
-                           if(value == '1') {
-                               $(this).html('<span class="fa fa-check-circle glyphicon glyphicon-ok-circle icon-ok-circle"></span>');
-                           } else {
-                               $(this).html('<span class="fa fa-minus-circle glyphicon glyphicon-minus-sign icon-minus-sign"></span>');
-                           }
+                    display: function(value, response) {
+                       // display boolean value as an icon
+                       if(value == '1') {
+                           $(this).html('<span class="fa fa-check-circle glyphicon glyphicon-ok-circle icon-ok-circle"></span>');
+                       } else {
+                           $(this).html('<span class="fa fa-minus-circle glyphicon glyphicon-minus-sign icon-minus-sign"></span>');
                        }
+                    },
+                    success: function(response, newValue) {
+                      // update display
+                      if(newValue == '1') {
+                          $(this).html('<span class="fa fa-check-circle glyphicon glyphicon-ok-circle icon-ok-circle"></span>');
+                      } else {
+                          $(this).html('<span class="fa fa-minus-circle glyphicon glyphicon-minus-sign icon-minus-sign"></span>');
+                      }
                     }
                 });
         }
@@ -594,9 +613,11 @@
     // Add on event handler
     $('body').on('click', '.inline-remove-field' , function(e) {
         e.preventDefault();
-
+        var r = confirm($('.inline-remove-field').attr('value'));
         var form = $(this).closest('.inline-field');
+        if ( r == true ){
         form.remove();
+      }
     });
 
     // Expose faForm globally

@@ -3,17 +3,19 @@ import warnings
 import inspect
 
 from sqlalchemy.orm.attributes import InstrumentedAttribute
+from sqlalchemy.orm.base import manager_of_class, instance_state
 from sqlalchemy.orm import joinedload, aliased
-from sqlalchemy.sql.expression import desc, ColumnElement
+from sqlalchemy.sql.expression import desc
 from sqlalchemy import Boolean, Table, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.expression import cast
 from sqlalchemy import Unicode
 
-from flask import flash
+from flask import current_app, flash
 
 from flask_admin._compat import string_types, text_type
 from flask_admin.babel import gettext, ngettext, lazy_gettext
+from flask_admin.contrib.sqla.tools import is_relationship
 from flask_admin.model import BaseModelView
 from flask_admin.model.form import create_editable_list_form
 from flask_admin.actions import action
@@ -51,7 +53,7 @@ class ModelView(BaseModelView):
     """
 
     column_select_related_list = ObsoleteAttr('column_select_related',
-                                             'list_select_related',
+                                              'list_select_related',
                                               None)
     """
         List of parameters for SQLAlchemy `subqueryload`. Overrides `column_auto_select_related`
@@ -271,6 +273,16 @@ class ModelView(BaseModelView):
                 form_optional_types = (Boolean, Unicode)
     """
 
+    ignore_hidden = True
+    """
+       Ignore field that starts with "_"
+
+       Example::
+
+           class MyModelView(BaseModelView):
+               ignore_hidden = False
+    """
+
     def __init__(self, model, session,
                  name=None, category=None, endpoint=None, url=None, static_folder=None,
                  menu_class_name=None, menu_icon_type=None, menu_icon_value=None):
@@ -316,6 +328,8 @@ class ModelView(BaseModelView):
                                         menu_class_name=menu_class_name,
                                         menu_icon_type=menu_icon_type,
                                         menu_icon_value=menu_icon_value)
+
+        self._manager = manager_of_class(self.model)
 
         # Primary key
         self._primary_key = self.scaffold_pk()
@@ -409,7 +423,9 @@ class ModelView(BaseModelView):
                 if len(p.columns) > 1:
                     filtered = tools.filter_foreign_columns(self.model.__table__, p.columns)
 
-                    if len(filtered) > 1:
+                    if len(filtered) == 0:
+                        continue
+                    elif len(filtered) > 1:
                         warnings.warn('Can not convert multiple-column properties (%s.%s)' % (self.model, p.key))
                         continue
 
@@ -471,13 +487,21 @@ class ModelView(BaseModelView):
 
             for c in self.column_sortable_list:
                 if isinstance(c, tuple):
-                    column, path = tools.get_field_with_path(self.model, c[1])
-                    column_name = c[0]
+                    if isinstance(c[1], tuple):
+                        column, path = [], []
+                        for item in c[1]:
+                            column_item, path_item = tools.get_field_with_path(self.model, item)
+                            column.append(column_item)
+                            path.append(path_item)
+                        column_name = c[0]
+                    else:
+                        column, path = tools.get_field_with_path(self.model, c[1])
+                        column_name = c[0]
                 else:
                     column, path = tools.get_field_with_path(self.model, c)
                     column_name = text_type(c)
 
-                if path and hasattr(path[0], 'property'):
+                if path and (hasattr(path[0], 'property') or isinstance(path[0], list)):
                     self._sortable_joins[column_name] = path
                 elif path:
                     raise Exception("For sorting columns in a related table, "
@@ -488,8 +512,6 @@ class ModelView(BaseModelView):
                     # column is in same table, use only model attribute name
                     if getattr(column, 'key', None) is not None:
                         column_name = column.key
-                    else:
-                        column_name = text_type(c)
 
                 # column_name must match column_name used in `get_list_columns`
                 result[column_name] = column
@@ -514,17 +536,23 @@ class ModelView(BaseModelView):
 
         formatted_columns = []
         for c in only_columns:
-            column, path = tools.get_field_with_path(self.model, c)
+            try:
+                column, path = tools.get_field_with_path(self.model, c)
 
-            if path:
-                # column is a relation (InstrumentedAttribute), use full path
-                column_name = text_type(c)
-            else:
-                # column is in same table, use only model attribute name
-                if getattr(column, 'key', None) is not None:
-                    column_name = column.key
-                else:
+                if path:
+                    # column is a relation (InstrumentedAttribute), use full path
                     column_name = text_type(c)
+                else:
+                    # column is in same table, use only model attribute name
+                    if getattr(column, 'key', None) is not None:
+                        column_name = column.key
+                    else:
+                        column_name = text_type(c)
+            except AttributeError:
+                # TODO: See ticket #1299 - allow virtual columns. Probably figure out
+                # better way to handle it. For now just assume if column was not found - it
+                # is virtual and there's column formatter for it.
+                column_name = text_type(c)
 
             visible_name = self.get_column_name(column_name)
 
@@ -555,6 +583,33 @@ class ModelView(BaseModelView):
 
         return bool(self.column_searchable_list)
 
+    def search_placeholder(self):
+        """
+            Return search placeholder.
+
+            For example, if set column_labels and column_searchable_list:
+
+            class MyModelView(BaseModelView):
+                column_labels = dict(name='Name', last_name='Last Name')
+                column_searchable_list = ('name', 'last_name')
+
+            placeholder is: "Name, Last Name"
+        """
+        if not self.column_searchable_list:
+            return None
+
+        placeholders = []
+
+        for searchable in self.column_searchable_list:
+            if isinstance(searchable, InstrumentedAttribute):
+                placeholders.append(
+                    self.column_labels.get(searchable.key, searchable.key))
+            else:
+                placeholders.append(
+                    self.column_labels.get(searchable, searchable))
+
+        return u', '.join(placeholders)
+
     def scaffold_filters(self, name):
         """
             Return list of enabled filters
@@ -566,7 +621,7 @@ class ModelView(BaseModelView):
             raise Exception('Failed to find field for filter: %s' % name)
 
         # Figure out filters for related column
-        if hasattr(attr, 'property') and hasattr(attr.property, 'direction'):
+        if is_relationship(attr):
             filters = []
 
             for p in self._get_model_iterator(attr.property.mapper.class_):
@@ -577,7 +632,7 @@ class ModelView(BaseModelView):
                     if column.foreign_keys or column.primary_key:
                         continue
 
-                    visible_name = '%s / %s' % (self.get_column_name(attr.prop.table.name),
+                    visible_name = '%s / %s' % (self.get_column_name(attr.prop.target.name),
                                                 self.get_column_name(p.key))
 
                     type_name = type(column.type).__name__
@@ -597,9 +652,11 @@ class ModelView(BaseModelView):
 
             return filters
         else:
-            is_hybrid_property = isinstance(attr, ColumnElement)
+            is_hybrid_property = tools.is_hybrid_property(self.model, name)
             if is_hybrid_property:
                 column = attr
+                if isinstance(name, string_types):
+                    column.key = name.split('.')[-1]
             else:
                 columns = tools.get_columns_for_field(attr)
 
@@ -608,18 +665,35 @@ class ModelView(BaseModelView):
 
                 column = columns[0]
 
+            # If filter related to relation column (represented by
+            # relation_name.target_column) we collect here relation name
+            joined_column_name = None
+            if isinstance(name, string_types) and '.' in name:
+                joined_column_name = name.split('.')[0]
+
             # Join not needed for hybrid properties
             if (not is_hybrid_property and tools.need_join(self.model, column.table) and
                     name not in self.column_labels):
-                visible_name = '%s / %s' % (
-                    self.get_column_name(column.table.name),
-                    self.get_column_name(column.name)
-                )
+                if joined_column_name:
+                    visible_name = '%s / %s / %s' % (
+                        joined_column_name,
+                        self.get_column_name(column.table.name),
+                        self.get_column_name(column.name)
+                    )
+                else:
+                    visible_name = '%s / %s' % (
+                        self.get_column_name(column.table.name),
+                        self.get_column_name(column.name)
+                    )
             else:
                 if not isinstance(name, string_types):
                     visible_name = self.get_column_name(name.property.key)
                 else:
-                    visible_name = self.get_column_name(name)
+                    if self.column_labels and name in self.column_labels:
+                        visible_name = self.column_labels[name]
+                    else:
+                        visible_name = self.get_column_name(name)
+                        visible_name = visible_name.replace('.', ' / ')
 
             type_name = type(column.type).__name__
 
@@ -630,10 +704,19 @@ class ModelView(BaseModelView):
                 options=self.column_choices.get(name),
             )
 
+            key_name = column
+            # In case of filter related to relation column filter key
+            # must be named with relation name (to prevent following same
+            # target column to replace previous)
+            if joined_column_name:
+                key_name = "{0}.{1}".format(joined_column_name, column)
+                for f in flt:
+                    f.key_name = key_name
+
             if joins:
-                self._filter_joins[column] = joins
+                self._filter_joins[key_name] = joins
             elif not is_hybrid_property and tools.need_join(self.model, column.table):
-                self._filter_joins[column] = [column.table]
+                self._filter_joins[key_name] = [column.table]
 
             return flt
 
@@ -658,6 +741,7 @@ class ModelView(BaseModelView):
                                    only=self.form_columns,
                                    exclude=self.form_excluded_columns,
                                    field_args=self.form_args,
+                                   ignore_hidden=self.ignore_hidden,
                                    extra_fields=self.form_extra_fields)
 
         if self.inline_models:
@@ -717,6 +801,12 @@ class ModelView(BaseModelView):
                 if p.mapper.class_ == self.model:
                     continue
 
+                # Check if it is pointing to a differnet bind
+                source_bind = getattr(self.model, '__bind_key__', None)
+                target_bind = getattr(p.mapper.class_, '__bind_key__', None)
+                if source_bind != target_bind:
+                    continue
+
                 if p.direction.name in ['MANYTOONE', 'MANYTOMANY']:
                     relations.add(p.key)
 
@@ -737,8 +827,6 @@ class ModelView(BaseModelView):
         """
             Return a query for the model type.
 
-            If you override this method, don't forget to override `get_count_query` as well.
-
             This method can be used to set a "persistent filter" on an index_view.
 
             Example::
@@ -746,6 +834,10 @@ class ModelView(BaseModelView):
                 class MyView(ModelView):
                     def get_query(self):
                         return super(MyView, self).get_query().filter(User.username == current_user.username)
+
+
+            If you override this method, don't forget to also override `get_count_query`, for displaying the correct
+            item count in the list view, and `get_one`, which is used when retrieving records for the edit view.
         """
         return self.session.query(self.model)
 
@@ -790,15 +882,9 @@ class ModelView(BaseModelView):
 
     def _get_default_order(self):
         order = super(ModelView, self)._get_default_order()
-
-        if order is not None:
-            field, direction = order
-
+        for field, direction in (order or []):
             attr, joins = tools.get_field_with_path(self.model, field)
-
-            return attr, joins, direction
-
-        return None
+            yield attr, joins, direction
 
     def _apply_sorting(self, query, joins, sort_column, sort_desc):
         if sort_column is not None:
@@ -806,13 +892,14 @@ class ModelView(BaseModelView):
                 sort_field = self._sortable_columns[sort_column]
                 sort_joins = self._sortable_joins.get(sort_column)
 
-                query, joins = self._order_by(query, joins, sort_joins, sort_field, sort_desc)
+                if isinstance(sort_field, list):
+                    for field_item, join_item in zip(sort_field, sort_joins):
+                        query, joins = self._order_by(query, joins, join_item, field_item, sort_desc)
+                else:
+                    query, joins = self._order_by(query, joins, sort_joins, sort_field, sort_desc)
         else:
             order = self._get_default_order()
-
-            if order:
-                sort_field, sort_joins, sort_desc = order
-
+            for sort_field, sort_joins, sort_desc in order:
                 query, joins = self._order_by(query, joins, sort_joins, sort_field, sort_desc)
 
         return query, joins
@@ -866,7 +953,9 @@ class ModelView(BaseModelView):
 
             # Figure out joins
             if isinstance(flt, sqla_filters.BaseSQLAFilter):
-                path = self._filter_joins.get(flt.column, [])
+                # If no key_name is specified, use filter column as filter key
+                filter_key = flt.key_name or flt.column
+                path = self._filter_joins.get(filter_key, [])
 
                 query, joins, alias = self._apply_path_joins(query, joins, path, inner_join=False)
 
@@ -886,7 +975,8 @@ class ModelView(BaseModelView):
                 spec = inspect.getargspec(flt.apply)
 
                 if len(spec.args) == 3:
-                    warnings.warn('Please update your custom filter %s to include additional `alias` parameter.' % repr(flt))
+                    warnings.warn('Please update your custom filter %s to '
+                                  'include additional `alias` parameter.' % repr(flt))
                 else:
                     raise
 
@@ -988,6 +1078,14 @@ class ModelView(BaseModelView):
         """
             Return a single model by its id.
 
+            Example::
+
+                def get_one(self, id):
+                    query = self.get_query()
+                    return query.filter(self.model.id == id).one()
+
+            Also see `get_query` for how to filter the list view.
+
             :param id:
                 Model id
         """
@@ -996,7 +1094,13 @@ class ModelView(BaseModelView):
     # Error handler
     def handle_view_exception(self, exc):
         if isinstance(exc, IntegrityError):
-            flash(gettext('Integrity error. %(message)s', message=text_type(exc)), 'error')
+            if current_app.config.get(
+                'ADMIN_RAISE_ON_INTEGRITY_ERROR',
+                current_app.config.get('ADMIN_RAISE_ON_VIEW_EXCEPTION')
+            ):
+                raise
+            else:
+                flash(gettext('Integrity error. %(message)s', message=text_type(exc)), 'error')
             return True
 
         return super(ModelView, self).handle_view_exception(exc)
@@ -1010,7 +1114,12 @@ class ModelView(BaseModelView):
                 Form instance
         """
         try:
-            model = self.model()
+            model = self._manager.new_instance()
+            # TODO: We need a better way to create model instances and stay compatible with
+            # SQLAlchemy __init__() behavior
+            state = instance_state(model)
+            self._manager.dispatch.init(state, [], {})
+
             form.populate_obj(model)
             self.session.add(model)
             self._on_model_change(form, model, True)

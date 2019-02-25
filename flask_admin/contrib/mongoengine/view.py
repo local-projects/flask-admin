@@ -140,7 +140,8 @@ class ModelView(BaseModelView):
 
     allowed_search_types = (mongoengine.StringField,
                             mongoengine.URLField,
-                            mongoengine.EmailField)
+                            mongoengine.EmailField,
+                            mongoengine.ReferenceField)
     """
         List of allowed search field types.
     """
@@ -323,7 +324,7 @@ class ModelView(BaseModelView):
             field_class = type(f)
 
             if (field_class == mongoengine.ListField and
-                isinstance(f.field, mongoengine.EmbeddedDocumentField)):
+                    isinstance(f.field, mongoengine.EmbeddedDocumentField)):
                 continue
 
             if field_class == mongoengine.EmbeddedDocumentField:
@@ -363,8 +364,8 @@ class ModelView(BaseModelView):
 
                 # Check type
                 if (field_type not in self.allowed_search_types):
-                        raise Exception('Can only search on text columns. ' +
-                                        'Failed to setup search for "%s"' % p)
+                    raise Exception('Can only search on text columns. ' +
+                                    'Failed to setup search for "%s"' % p)
 
                 self._search_fields.append(p)
 
@@ -461,7 +462,7 @@ class ModelView(BaseModelView):
         # prevents running complex Q queries and, as a result,
         # Flask-Admin does not support per-word searching like
         # in other backends
-        op, term = parse_like_term(search)
+        op, term = parse_like_term(search_term)
 
         criteria = None
         
@@ -469,9 +470,12 @@ class ModelView(BaseModelView):
             if isinstance(field, (mongoengine.base.fields.ObjectIdField)):
                 if ObjectId.is_valid(term):
                     flt = {field.name: term}
+            elif type(field) == mongoengine.ReferenceField:
+                import re
+                regex = re.compile('.*%s.*' % term)
             else:
-                flt = {'%s__%s' % (field.name, op): term}
-                
+                regex = term
+            flt = {'%s__%s' % (field.name, op): regex}
             q = mongoengine.Q(**flt)
 
             if criteria is None:
@@ -527,7 +531,9 @@ class ModelView(BaseModelView):
             order = self._get_default_order()
 
             if order:
-                query = query.order_by('%s%s' % ('-' if order[1] else '', order[0]))
+                keys = ['%s%s' % ('-' if desc else '', col)
+                        for (col, desc) in order]
+                query = query.order_by(*keys)
 
         # Pagination
         if page_size is None:
@@ -633,7 +639,6 @@ class ModelView(BaseModelView):
 
         return True
 
-
     # FileField access API
     @expose('/api/file/')
     def api_file_view(self):
@@ -652,9 +657,7 @@ class ModelView(BaseModelView):
 
         return Response(data.read(),
                         content_type=data.content_type,
-                        headers={
-                            'Content-Length': data.length
-                        })
+                        headers={'Content-Length': data.length})
 
     # Default model actions
     def is_action_allowed(self, name):

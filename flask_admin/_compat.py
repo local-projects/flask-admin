@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# flake8: noqa
 """
     flask_admin._compat
     ~~~~~~~~~~~~~~~~~~~~~~~
@@ -37,7 +38,7 @@ if not PY2:
 
     # Various tools
     from functools import reduce
-    from urllib.parse import urljoin, urlparse
+    from urllib.parse import urljoin, urlparse, quote
 else:
     text_type = unicode
     string_types = (str, unicode)
@@ -61,6 +62,7 @@ else:
     # Helpers
     reduce = __builtins__['reduce'] if isinstance(__builtins__, dict) else __builtins__.reduce
     from urlparse import urljoin, urlparse
+    from urllib import quote
 
 
 def with_metaclass(meta, *bases):
@@ -87,17 +89,4 @@ def with_metaclass(meta, *bases):
 try:
     from collections import OrderedDict
 except ImportError:
-    # Bare-bones OrderedDict implementation for Python2.6 compatibility
-    class OrderedDict(dict):
-        def __init__(self, *args, **kwargs):
-            dict.__init__(self, *args, **kwargs)
-            self.ordered_keys = []
-        def __setitem__(self, key, value):
-            self.ordered_keys.append(key)
-            dict.__setitem__(self, key, value)
-        def __iter__(self):
-            return (k for k in self.ordered_keys)
-        def iteritems(self):
-            return ((k, self[k]) for k in self.ordered_keys)
-        def items(self):
-            return list(self.iteritems())
+    from ordereddict import OrderedDict

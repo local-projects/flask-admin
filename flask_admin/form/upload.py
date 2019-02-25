@@ -5,7 +5,7 @@ from werkzeug import secure_filename
 from werkzeug.datastructures import FileStorage
 
 from wtforms import ValidationError, fields
-from wtforms.widgets import HTMLString, html_params
+from wtforms.widgets import html_params
 
 try:
     from wtforms.fields.core import _unset_value as unset_value
@@ -15,6 +15,7 @@ except ImportError:
 from flask_admin.babel import gettext
 from flask_admin.helpers import get_url
 
+from flask_admin._backwards import Markup
 from flask_admin._compat import string_types, urljoin
 
 
@@ -59,7 +60,7 @@ class FileUploadInput(object):
         else:
             value = field.data or ''
 
-        return HTMLString(template % {
+        return Markup(template % {
             'text': html_params(type='text',
                                 readonly='readonly',
                                 value=value,
@@ -83,6 +84,7 @@ class ImageUploadInput(object):
     data_template = ('<div class="image-thumbnail">'
                      ' <img %(image)s>'
                      ' <input type="checkbox" name="%(marker)s">Delete</input>'
+                     ' <input %(text)s>'
                      '</div>'
                      '<input %(file)s>')
 
@@ -91,6 +93,9 @@ class ImageUploadInput(object):
         kwargs.setdefault('name', field.name)
 
         args = {
+            'text': html_params(type='hidden',
+                                value=field.data,
+                                name=field.name),
             'file': html_params(type='file',
                                 **kwargs),
             'marker': '_%s-delete' % field.name
@@ -104,7 +109,7 @@ class ImageUploadInput(object):
         else:
             template = self.empty_template
 
-        return HTMLString(template % args)
+        return Markup(template % args)
 
     def get_url(self, field):
         if field.thumbnail_size:
@@ -196,9 +201,7 @@ class FileUploadField(fields.StringField):
                 map(lambda x: x.lower(), self.allowed_extensions))
 
     def _is_uploaded_file(self, data):
-        return (data
-                and isinstance(data, FileStorage)
-                and data.filename)
+        return (data and isinstance(data, FileStorage) and data.filename)
 
     def pre_validate(self, form):
         if self._is_uploaded_file(self.data) and not self.is_file_allowed(self.data.filename):
@@ -275,7 +278,7 @@ class FileUploadField(fields.StringField):
         if not op.exists(op.dirname(path)):
             os.makedirs(os.path.dirname(path), self.permission | 0o111)
 
-        if self._allow_overwrite == False and os.path.exists(path):
+        if (self._allow_overwrite is False) and os.path.exists(path):
             raise ValueError(gettext('File "%s" already exists.' % path))
 
         data.save(path)

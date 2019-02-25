@@ -6,7 +6,6 @@ from wtforms import form, fields, validators
 import flask_admin as admin
 import flask_login as login
 from flask_admin.contrib.mongoengine import ModelView
-from flask_admin import helpers
 
 # Create application
 app = Flask(__name__)
@@ -28,12 +27,17 @@ class User(db.Document):
     password = db.StringField(max_length=64)
 
     # Flask-Login integration
+    # NOTE: is_authenticated, is_active, and is_anonymous
+    # are methods in Flask-Login < 0.3.0
+    @property
     def is_authenticated(self):
         return True
 
+    @property
     def is_active(self):
         return True
 
+    @property
     def is_anonymous(self):
         return False
 
@@ -47,7 +51,7 @@ class User(db.Document):
 
 # Define login and registration forms (for flask-login)
 class LoginForm(form.Form):
-    login = fields.TextField(validators=[validators.required()])
+    login = fields.StringField(validators=[validators.required()])
     password = fields.PasswordField(validators=[validators.required()])
 
     def validate_login(self, field):
@@ -64,8 +68,8 @@ class LoginForm(form.Form):
 
 
 class RegistrationForm(form.Form):
-    login = fields.TextField(validators=[validators.required()])
-    email = fields.TextField()
+    login = fields.StringField(validators=[validators.required()])
+    email = fields.StringField()
     password = fields.PasswordField(validators=[validators.required()])
 
     def validate_login(self, field):

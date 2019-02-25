@@ -1,5 +1,6 @@
 import time
 import datetime
+import uuid
 
 from flask_admin.babel import lazy_gettext
 
@@ -8,7 +9,7 @@ class BaseFilter(object):
     """
         Base filter class.
     """
-    def __init__(self, name, options=None, data_type=None):
+    def __init__(self, name, options=None, data_type=None, key_name=None):
         """
             Constructor.
 
@@ -18,10 +19,13 @@ class BaseFilter(object):
                 List of fixed options. If provided, will use drop down instead of textbox.
             :param data_type:
                 Client-side widget type to use.
+            :param key_name:
+                Optional name who represent this filter.
         """
         self.name = name
         self.options = options
         self.data_type = data_type
+        self.key_name = key_name
 
     def get_options(self, view):
         """
@@ -245,10 +249,10 @@ class BaseTimeBetweenFilter(BaseFilter):
     def clean(self, value):
         timetuples = [time.strptime(range, '%H:%M:%S')
                       for range in value.split(' to ')]
-        return [datetime.time(timetuple.tm_hour,
-                              timetuple.tm_min,
-                              timetuple.tm_sec)
-                              for timetuple in timetuples]
+        return [
+            datetime.time(timetuple.tm_hour, timetuple.tm_min, timetuple.tm_sec)
+            for timetuple in timetuples
+        ]
 
     def operation(self):
         return lazy_gettext('between')
@@ -264,6 +268,29 @@ class BaseTimeBetweenFilter(BaseFilter):
         except ValueError:
             raise
             return False
+
+
+class BaseUuidFilter(BaseFilter):
+    """
+        Base uuid filter
+    """
+    def __init__(self, name, options=None, data_type=None):
+        super(BaseUuidFilter, self).__init__(name,
+                                             options,
+                                             data_type='uuid')
+
+    def clean(self, value):
+        value = uuid.UUID(value)
+        return str(value)
+
+
+class BaseUuidListFilter(BaseFilter):
+    """
+        Base uuid list filter
+    """
+
+    def clean(self, value):
+        return [str(uuid.UUID(v.strip())) for v in value.split(',') if v.strip()]
 
 
 def convert(*args):

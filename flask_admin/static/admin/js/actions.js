@@ -1,7 +1,7 @@
 var AdminModelActions = function(actionErrorMessage, actionConfirmations) {
-    // Actions helpers. TODO: Move to separate file
+    // batch actions helpers
     this.execute = function(name) {
-        var selected = $('input.action-checkbox:checked').size();
+        var selected = $('input.action-checkbox:checked').length;
 
         if (selected === 0) {
             alert(actionErrorMessage);
@@ -33,4 +33,19 @@ var AdminModelActions = function(actionErrorMessage, actionConfirmations) {
             $('input.action-checkbox').prop('checked', this.checked);
         });
     });
+
+    $(function() {
+        var inputs = $('input.action-checkbox');
+        inputs.change(function() {
+            var allInputsChecked = true;
+            for (var i = 0; i < inputs.length; i++) {
+                if (!inputs[i].checked) {
+                    allInputsChecked = false;
+                    break;
+                }
+            }
+            $('.action-rowtoggle').attr('checked', allInputsChecked);
+        });
+    });
 };
+var modelActions = new AdminModelActions(JSON.parse($('#message-data').text()), JSON.parse($('#actions-confirmation-data').text()));

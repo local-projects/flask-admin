@@ -1,7 +1,4 @@
-import warnings
-
 import geoalchemy2
-from flask import current_app
 from shapely.geometry import shape
 from sqlalchemy import func
 
@@ -11,70 +8,52 @@ from .widgets import LeafletWidget
 
 
 class GeoJSONField(JSONField):
-    widget = LeafletWidget()
 
     def __init__(self, label=None, validators=None, geometry_type="GEOMETRY",
-                 srid='-1', session=None, **kwargs):
+                 srid='-1', session=None, tile_layer_url=None,
+                 tile_layer_attribution=None, **kwargs):
+        self.widget = LeafletWidget(
+            tile_layer_url=tile_layer_url,
+            tile_layer_attribution=tile_layer_attribution
+        )
         super(GeoJSONField, self).__init__(label, validators, **kwargs)
         self.web_srid = 4326
         self.srid = srid
-        if self.srid is -1:
+        if self.srid == -1:
             self.transform_srid = self.web_srid
         else:
             self.transform_srid = self.srid
         self.geometry_type = geometry_type.upper()
         self.session = session
 
-    def _flip_coordinates(self, other_func):
-        if current_app.config.get('MAPBOX_FIX_COORDINATES_ORDER'):
-            return func.ST_FlipCoordinates(other_func)
-        else:
-            warnings.warn(
-                'Consider setting the Flask config option '
-                'MAPBOX_FIX_COORDINATES_ORDER as the current implementation '
-                'passes lng/lat coordinates in the wrong order to '
-                'Leaflet. Without this setting any coordinates saved will '
-                'have flipped coordinates in your database. '
-                'Please note that this will become the standard behavior in '
-                'the next major version of Flask-Admin.'
-            )
-            return other_func
-
     def _value(self):
         if self.raw_data:
             return self.raw_data[0]
         if type(self.data) is geoalchemy2.elements.WKBElement:
-            if self.srid is -1:
-                self.data = self.session.scalar(
-                    func.ST_AsGeoJson(
-                        self._flip_coordinates(self.data)
-                    )
-                )
+            if self.srid == -1:
+                return self.session.scalar(func.ST_AsGeoJson(self.data))
             else:
-                self.data = self.session.scalar(
+                return self.session.scalar(
                     func.ST_AsGeoJson(
-                        self._flip_coordinates(
-                            func.ST_Transform(self.data, self.web_srid)
-                        )
+                        func.ST_Transform(self.data, self.web_srid)
                     )
                 )
-        return super(GeoJSONField, self)._value()
+        else:
+            return ''
 
     def process_formdata(self, valuelist):
         super(GeoJSONField, self).process_formdata(valuelist)
-        if str(self.data) is '':
+        if str(self.data) == '':
             self.data = None
         if self.data is not None:
             web_shape = self.session.scalar(
                 func.ST_AsText(
-                    self._flip_coordinates(
-                        func.ST_Transform(
-                            func.ST_GeomFromText(
-                                shape(self.data).wkt,
-                                self.web_srid
-                            ),
-                            self.transform_srid
-                        )
+                    func.ST_Transform(
+                        func.ST_GeomFromText(
+                            shape(self.data).wkt,
+                            self.web_srid
+                        ),
+                        self.transform_srid
                     )
                 )
             )

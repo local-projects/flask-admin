@@ -32,12 +32,17 @@ class User(db.Model):
     password = db.Column(db.String(64))
 
     # Flask-Login integration
+    # NOTE: is_authenticated, is_active, and is_anonymous
+    # are methods in Flask-Login < 0.3.0
+    @property
     def is_authenticated(self):
         return True
 
+    @property
     def is_active(self):
         return True
 
+    @property
     def is_anonymous(self):
         return False
 
@@ -51,7 +56,7 @@ class User(db.Model):
 
 # Define login and registration forms (for flask-login)
 class LoginForm(form.Form):
-    login = fields.TextField(validators=[validators.required()])
+    login = fields.StringField(validators=[validators.required()])
     password = fields.PasswordField(validators=[validators.required()])
 
     def validate_login(self, field):
@@ -71,8 +76,8 @@ class LoginForm(form.Form):
 
 
 class RegistrationForm(form.Form):
-    login = fields.TextField(validators=[validators.required()])
-    email = fields.TextField()
+    login = fields.StringField(validators=[validators.required()])
+    email = fields.StringField()
     password = fields.PasswordField(validators=[validators.required()])
 
     def validate_login(self, field):

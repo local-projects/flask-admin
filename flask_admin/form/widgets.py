@@ -10,6 +10,10 @@ def _is_bootstrap3():
     view = h.get_current_view()
     return view and view.admin.template_mode == 'bootstrap3'
 
+def _is_adminlte():
+    view = h.get_current_view()
+    return view and view.admin.template_mode == 'adminlte'
+
 
 class Select2Widget(widgets.Select):
     """

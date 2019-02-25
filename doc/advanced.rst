@@ -34,7 +34,7 @@ Enabling localization is simple:
 
 #. Initialize Flask-BabelEx by creating instance of `Babel` class::
 
-        from flask import Flask
+        from flask import app
         from flask_babelex import Babel
 
         app = Flask(__name__)
@@ -544,3 +544,4 @@ While the wrapped function should accept only one parameter - `ids`::
                     raise
 
                 flash(gettext('Failed to approve users. %(error)s', error=str(ex)), 'error')
+

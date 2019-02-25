@@ -1,0 +1,74 @@
+{% extends 'admin/master.html' %}
+{% import 'admin/lib.html' as lib with context %}
+{% from 'admin/lib.html' import extra with context %} {# backward compatible #}
+
+{% block head_css %}
+    {{super()}}
+    <link href="https://gitcdn.github.io/bootstrap-toggle/2.2.0/css/bootstrap-toggle.min.css" rel="stylesheet">
+    <link href="{{ admin_static.url(filename='adminlte/plugins/bootstrap-slider/slider.css') }}" rel="stylesheet">
+    <link href="{{ admin_static.url(filename='vendor/trumbowyg/trumbowyg.min.css') }}" rel="stylesheet">
+{% endblock %}
+
+{% block body_header %}
+    <h1>{{ admin_view.name }} {% if admin_view.subcategory %}({{admin_view.category}}){% endif %}</h1>
+    {% if admin_view.description %}<h6 style="margin-bottom:0;">{{admin_view.description}}</h6>{% endif %}
+{% endblock %}
+
+{% block head %}
+  {{ super() }}
+  {{ lib.form_css() }}
+{% endblock %}
+
+{% block body %}
+<div class="box">
+    <div class="box-body">
+      {% block navlinks %}
+      <div class="nav-tabs-custom">
+        <ul class="nav nav-tabs">
+          <li>
+              <a href="{{ return_url }}">{{ _gettext('List') }}</a>
+          </li>
+          {%- if admin_view.can_create -%}
+          <li>
+              <a href="{{ get_url('.create_view', url=return_url) }}">{{ _gettext('Create') }}</a>
+          </li>
+          {%- endif -%}
+          <li class="active">
+              <a href="javascript:void(0)">{{ _gettext('Edit') }}</a>
+          </li>
+          {%- if admin_view.can_view_details -%}
+          <li>
+              <a href="{{ get_url('.details_view', id=model.id, url=return_url) }}">{{ _gettext('Details') }}</a>
+          </li>
+          {%- endif -%}
+        </ul>
+      </div>
+      {% endblock %}
+
+      {% block edit_form %}
+        {{ lib.render_form(form, return_url, extra(), form_opts) }}
+      {% endblock %}
+
+    </div>
+</div>
+{% endblock %}
+
+{% block tail_js %}
+    {{ super() }}
+    {{ lib.form_js() }}
+    <script src="https://gitcdn.github.io/bootstrap-toggle/2.2.0/js/bootstrap-toggle.min.js"></script>
+    <script src="{{ admin_static.url( filename='vendor/jquery.plugin.min.js')}}"></script>
+    <script src="{{ admin_static.url( filename='vendor/jquery.maxlength.min.js')}}"></script>
+    <script src="{{ admin_static.url( filename='adminlte/js/autosize.min.js')}}"></script>
+    <script src="{{ admin_static.url( filename='vendor/trumbowyg/trumbowyg.min.js')}}"></script>
+{% endblock %}
+
+{% block tail %}
+  {{ super() }}
+    <script type="text/javascript">
+        // Apply global styles for current page after page loaded
+        $(function() {
+            faForm.applyGlobalStyles(document);
+        });
+    </script>
+{% endblock %}

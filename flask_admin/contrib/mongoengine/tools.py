@@ -1,18 +1,25 @@
+from flask import current_app as app
+
 def parse_like_term(term):
     """
         Parse search term into (operation, term) tuple. Recognizes operators
         in the beginning of the search term. Case insensitive is the default.
 
-        * = case sensitive (can precede other operators)
+        * = case insensitive (can precede other operators)
         ^ = starts with
         = = exact
 
         :param term:
             Search term
     """
-    case_sensitive = term.startswith('*')
-    if case_sensitive:
-        term = term[1:]
+    if app.settings.get('FLASK').get('ADMIN_CASE_INSENSITIVE_SEARCH'):
+        case_insensitive = True
+        if term.startswith('*'):
+            term = term[1:]
+    else:
+        case_insensitive = term.startswith('*')
+        if case_insensitive:
+            term = term[1:]
     # apply operators
     if term.startswith('^'):
         oper = 'startswith'
@@ -23,6 +30,6 @@ def parse_like_term(term):
     else:
         oper = 'contains'
     # add case insensitive flag
-    if not case_sensitive:
+    if case_insensitive:
         oper = 'i' + oper
     return oper, term

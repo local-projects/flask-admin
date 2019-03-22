@@ -628,3 +628,138 @@
         faForm.applyGlobalStyles(document);
     });
 })();
+
+
+var faEvents = {
+    submitForm: {
+        handler: function(button) {
+            // Reset alerts
+            $(".alert-danger").remove();
+            $('.bg-danger.has-error').removeClass('has-error').removeClass('bg-danger');
+            $('.validation-error').remove();
+
+            window.onbeforeunload = function() { return "Saving hasn't finished. Your work may be lost if you exit."; };
+            $("#loading-overlay > .overlay-content > .progress").circleProgress({
+                value: 0,
+                size: 100,
+                fill: {
+                    gradient: ["#367FA9", "#3C8DBC"]
+                },
+                animation: { duration: 800, easing: "easeInOutCubic" }
+            });
+            $("#loading-overlay > .overlay-content > .progress").circleProgress('value', 0);
+            $("#loading-overlay > .overlay-content > .progress-text").html("Prepping save...");
+            $("#loading-overlay").addClass("overlay-open");
+            $(".faSaveBtn").prop("disabled", true);
+
+            var $button = $(button);
+            var buttonName = $button.attr('name')
+            var $form = $button.closest("form");
+
+            // Just in case nobody else did
+            $form.on('submit', function(e) {
+                e.preventDefault();
+            });
+
+            // Manually trigger all those who set handlers
+            $form.trigger('submit');
+
+            // FormData does not force CKEditor to update its
+            // fields so we need to do it ourselves
+            if (typeof(CKEDITOR) != "undefined") {
+                for (var instance in CKEDITOR.instances) {
+                    CKEDITOR.instances[instance].updateElement();
+                }
+            }
+
+            var formData = new FormData($form[0]);
+
+            // This way we get our redirects from the server
+            if (buttonName) {
+                formData.append(buttonName, true);
+            }
+
+            var ajax = new XMLHttpRequest();
+            ajax.upload.addEventListener("progress", faEvents.submitForm.progressHandler, false);
+            ajax.addEventListener("load", faEvents.submitForm.completeHandler, false);
+            ajax.addEventListener("error", faEvents.submitForm.errorHandler, false);
+            ajax.addEventListener("abort", faEvents.submitForm.abortHandler, false);
+            ajax.open("POST", window.location.href);
+            ajax.send(formData);
+        },
+
+        progressHandler: function(event) {
+            var percent = (event.loaded / event.total) - 0.01;
+            if(percent < 0) percent = 0;
+
+            if (percent > 0.98)
+            {
+                percent = 1
+                // Cropping and/or something else may take awhile after 100% upload
+                $("#loading-overlay > .overlay-content > .progress-text").html("Processing save...");
+            }
+            else
+            {
+                $("#loading-overlay > .overlay-content > .progress-text").html(Math.round(percent * 100) + "%");
+            }
+            $("#loading-overlay > .overlay-content > .progress").circleProgress('value', percent);
+        },
+
+        completeHandler:  function(event) {
+            window.onbeforeunload = function () {}
+            var response = $(event.target.responseText);
+            var errors = $(".input-errors", response);
+            if(errors.length > 0)
+            {
+                $(".alert-danger").remove();
+                faEvents.submitForm.addAlert("Please resolve errors.");
+                $(errors).each(function() {
+                    var text  = $(this).text().trim();
+                    var ref = $(this).parent().find('[name]').attr('id');
+                    var $ref = $('#' + ref).parents('.form-group').children('label');
+                    $ref.addClass('has-error').addClass('bg-danger');
+                    $ref.append('<p class="validation-error">' + text + '</p>');
+                });
+                $(".faSaveBtn").prop("disabled", false);
+                $("#loading-overlay").removeClass("overlay-open");
+                $("html, body").animate({ scrollTop: 0 }, "slow");
+                return;
+            } else {
+                if (event.target.responseURL == window.location.href) {
+                    $(".faSaveBtn").prop("disabled", false);
+                    $("#loading-overlay > .overlay-content > .progress-text").html("Saved");
+                    setTimeout(function() {
+                        $("#loading-overlay").removeClass("overlay-open");
+                    }, 300);
+                    if (window.onFlaskFormComplete) window.onFlaskFormComplete();
+                }
+                else {
+                    window.location.href = event.target.responseURL;
+                }
+            }
+        },
+
+        errorHandler: function(event) {
+            faEvents.submitForm.addAlert("There was an internal error when saving. Please try again.");
+            $(".faSaveBtn").prop("disabled", false);
+            $("#loading-overlay").removeClass("overlay-open");
+            window.onbeforeunload = function () {}
+        },
+
+        abortHandler: function(event) {
+            faEvents.submitForm.addAlert("There was an internal error when saving. Please try again.");
+            $(".faSaveBtn").prop("disabled", false);
+            $("#loading-overlay").removeClass("overlay-open");
+            window.onbeforeunload = function () {}
+        },
+
+        addAlert: function(message) {
+            var html = "<div class='alert alert-danger alert-dismissible'>";
+            html += "<button type='button' class='close' data-dismiss='alert' aria-hidden='true'>×</button>";
+            html += "<i class='icon fa fa-ban'></i>" + message;
+            html += "</div>";
+
+            $("section.content").prepend(html);
+        }
+    }
+};

@@ -42,7 +42,7 @@ class FileUploadInput(object):
 
     data_template = ('<div>'
                      ' <input %(text)s>'
-                     ' <input type="checkbox" name="%(marker)s">Delete</input>'
+                     # ' <input type="checkbox" name="%(marker)s">Delete</input>'
                      '</div>'
                      '<input %(file)s>')
 
@@ -68,7 +68,7 @@ class FileUploadInput(object):
             'file': html_params(type='file',
                                 value=value,
                                 **kwargs),
-            'marker': '_%s-delete' % field.name
+            # 'marker': '_%s-delete' % field.name
         })
 
 

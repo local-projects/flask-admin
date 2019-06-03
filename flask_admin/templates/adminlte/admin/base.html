@@ -99,7 +99,7 @@
           </section>
 
           <section class="content">
-              <img style="width:35%;padding:50px;padding-top:30px" src="{{ admin_static.url(filename='admin/images/HPBM_wordmark.png') }}" alt="HPBM Logo">
+              <img id="hpbm_logo" style="width:35%;padding:50px;padding-top:30px;display:none" src="{{ admin_static.url(filename='admin/images/HPBM_wordmark.png') }}" alt="HPBM Logo">
               {% block messages %}
               {{ layout.messages() }}
               {% endblock %}

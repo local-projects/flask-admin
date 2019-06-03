@@ -728,6 +728,13 @@ var faEvents = {
                 if (event.target.responseURL == window.location.href) {
                     $(".faSaveBtn").prop("disabled", false);
                     $("#loading-overlay > .overlay-content > .progress-text").html("Saved");
+                    var _continue_editing_button = $("button[name='_continue_editing']")
+                    _continue_editing_button.html("✔️ Your record has been saved.")
+                    _continue_editing_button[0].style.color = "green"
+                    setTimeout(function() {
+                        _continue_editing_button.html("Save and Continue Editing");
+                        _continue_editing_button[0].style.color = "black"
+                    }, 2000);
                     setTimeout(function() {
                         $("#loading-overlay").removeClass("overlay-open");
                     }, 300);

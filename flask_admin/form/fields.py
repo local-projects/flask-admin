@@ -189,7 +189,12 @@ class JSONField(fields.TextAreaField):
             return self.raw_data[0]
         elif self.data:
             # prevent utf8 characters from being converted to ascii
-            return as_unicode(json.dumps(self.data, ensure_ascii=False))
+            from collections import OrderedDict
+
+            test_json = json.JSONDecoder(object_pairs_hook=OrderedDict).decode(self.data)
+            return json.dumps(test_json, indent=4)
+
+            # return as_unicode(json.dumps(self.data, ensure_ascii=False))
         else:
             return ''
 

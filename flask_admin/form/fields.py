@@ -185,14 +185,27 @@ class Select2TagsField(fields.StringField):
 
 class JSONField(fields.TextAreaField):
     def _value(self):
-        if self.raw_data:
-            return self.raw_data[0]
-        elif self.data:
+        # if self.raw_data:
+        #     return self.raw_data[0]
+        if self.data:
             # prevent utf8 characters from being converted to ascii
             from collections import OrderedDict
 
-            test_json = json.JSONDecoder(object_pairs_hook=OrderedDict).decode(self.data)
-            return json.dumps(test_json, indent=4)
+            # {'saveBattery': False, 'forceHpbmWifi': False, 'modifyFramerate': False, 'controlBrightness': False,
+            #  'quuppaTagMinBatteryLevel': 0.1}
+            #
+            # print(type(self.data))
+            #
+            # data_string = str(self.data)
+            # data_string.replace('True', 'true')
+            # data_string.replace('False', 'false')
+            # data_string.replace("'", '"')
+            # print(data_string)
+            #
+            # print(dir(self))
+            #
+            # test_json = json.JSONDecoder(object_pairs_hook=OrderedDict).decode(data_string)
+            return json.dumps(self.data, indent=4)
 
             # return as_unicode(json.dumps(self.data, ensure_ascii=False))
         else:

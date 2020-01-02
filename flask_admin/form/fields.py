@@ -186,7 +186,10 @@ class Select2TagsField(fields.StringField):
 class JSONField(fields.TextAreaField):
     def _value(self):
         if self.data:
-            return json.dumps(json.loads(self.data), sort_keys=False, indent=4, separators=(',', ': '))
+            if type(self.data) is dict:
+                return json.dumps(self.data, sort_keys=False, indent=4, separators=(',', ': '))
+            else:
+                return json.dumps(json.loads(self.data), sort_keys=False, indent=4, separators=(',', ': '))
         else:
             return ''
 
